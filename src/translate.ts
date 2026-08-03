@@ -147,12 +147,20 @@ function piAssistantToOrchestration(msg: AssistantMessage): ChatMessage {
 	// Bedrock (which SAP orchestration wraps) rejects assistant messages with
 	// no text AND no tool_calls — "Assistant message has neither text nor
 	// tool_use blocks." Pi can produce these when a prior stream was
-	// interrupted or the turn contained only block types we don't translate
-	// (e.g. reasoning-only). Substitute a single space so the message
-	// validates while preserving conversation alternation 1:1 with pi's log.
+	// interrupted (e.g. aborting mid tool-call) or the turn contained only
+	// block types we don't translate (e.g. reasoning-only).
+	//
+	// A whitespace-only placeholder does NOT work: Anthropic-on-Bedrock trims
+	// text content back to empty, so a single space collapses and the request
+	// still 400s with the same "neither text nor tool_use" error — poisoning
+	// every subsequent request in the conversation. Substitute NON-whitespace
+	// text so the message validates, while preserving conversation alternation
+	// 1:1 with pi's log. Only needed when there are no tool_calls to carry the
+	// turn; a whitespace-only accumulated `text` is treated as empty too.
+	const hasText = text.trim().length > 0;
 	const result: AssistantChatMessage = {
 		role: "assistant",
-		content: text || (toolCalls.length === 0 ? " " : ""),
+		content: hasText ? text : toolCalls.length === 0 ? "(interrupted)" : "",
 	};
 	if (toolCalls.length > 0) result.tool_calls = toolCalls;
 	return result;

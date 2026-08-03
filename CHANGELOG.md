@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Orchestration route no longer 400s with "Assistant message has neither text
+  nor tool_use blocks" after an assistant turn is interrupted (for example when
+  aborting a tool call mid-stream). The translator previously substituted a
+  single-space placeholder for empty/interrupted/reasoning-only assistant turns,
+  but Anthropic-on-Bedrock trims it back to empty and re-triggers the 400 on
+  every subsequent request in the conversation. It now emits non-whitespace
+  placeholder text (and treats a whitespace-only accumulated text as empty),
+  bringing the orchestration translator to parity with the foundation ones.
+  Added orchestration coverage to the offline empty-content regression test.
+
 ## [0.4.1] - 2026-07-21
 
 ### Changed
