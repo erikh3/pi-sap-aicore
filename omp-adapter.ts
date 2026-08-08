@@ -105,6 +105,23 @@ function resolveServiceKey(options: SimpleStreamOptions | undefined): string | u
 }
 
 /**
+ * Normalize omp's `Context` to the shape the upstream (pi 0.81) SAP translator
+ * expects. The one incompatibility that matters: omp typed `Context.systemPrompt`
+ * as `string[]` (multiple system blocks), whereas pi 0.81 used a single `string`.
+ * `translate.ts` assigns `context.systemPrompt` straight into SAP's `system`
+ * message `content`, which is `string | TextContent[]` — an array of BARE strings
+ * is neither, so SAP orchestration 400s. Join the blocks into one string
+ * (blank-line separated), matching pi's original single-prompt contract.
+ */
+function normalizeContext(context: Context): Context {
+	const sp = (context as { systemPrompt?: unknown }).systemPrompt;
+	if (Array.isArray(sp)) {
+		return { ...context, systemPrompt: sp.join("\n\n") } as unknown as Context;
+	}
+	return context;
+}
+
+/**
  * Build a streamSimple that re-hydrates the rich model from the catalog before
  * delegating. omp's `ProviderModelConfig` has no slot for this extension's custom
  * `thinkingLevelMap`, so omp strips it when it reconstructs `Model` objects from
@@ -121,7 +138,7 @@ function wrapStream(
 		// the upstream provider's stream path (see stream.ts ensureServiceKey).
 		const serviceKey = resolveServiceKey(options);
 		if (serviceKey) process.env[AICORE_SERVICE_KEY_ENV] = serviceKey;
-		return provider.streamSimple(effectiveModel, context, options);
+		return provider.streamSimple(effectiveModel, normalizeContext(context), options);
 	};
 }
 
