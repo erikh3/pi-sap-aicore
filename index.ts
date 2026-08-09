@@ -7,13 +7,28 @@ import { createSapProviders } from "./src/providers.ts";
 import { registerSapModelCommands } from "./src/sap-model-commands.ts";
 
 /**
- * omp's `registerProvider(name, config)` takes two arguments; upstream pi 0.81's
- * `registerProvider(providerObject)` takes one. Detect the host by arity so a
- * single build works on both. `Function.length` excludes optional/rest params,
- * so omp's `(name, config, sourceId?)` reports 2 and pi's `(provider)` reports 1.
+ * Detect an oh-my-pi (omp) host vs upstream pi (coding-agent).
+ *
+ * The previous arity check (`pi.registerProvider.length >= 2`) was wrong: BOTH
+ * hosts expose an arity-2 `registerProvider` at runtime (coding-agent's is
+ * `(providerOrName, config)` with a `Provider`-object overload), so it flagged
+ * upstream pi as omp and routed it through the omp adapter. That adapter maps
+ * the provider apiKey field to the env-var NAME `AICORE_SERVICE_KEY` (per omp's
+ * env-var-name-first resolver), which upstream pi instead treated as a literal
+ * key — producing the "Got: AICORE_SERVICE_KEY..." service-key parse error.
+ *
+ * Detect omp positively instead, by an omp-exclusive extension-API member:
+ * `getServiceTiers`/`setServiceTier` exist only on omp's injected API object
+ * (upstream pi has neither; it has `registerEntryRenderer`). Anything that is
+ * not positively omp falls through to the original upstream Provider-object
+ * path, preserving default behavior.
  */
 function isOmpHost(pi: ExtensionAPI): boolean {
-	return typeof pi.registerProvider === "function" && pi.registerProvider.length >= 2;
+	const host = pi as unknown as Record<string, unknown>;
+	return (
+		typeof host.getServiceTiers === "function" &&
+		typeof host.setServiceTier === "function"
+	);
 }
 
 export default function (pi: ExtensionAPI) {
