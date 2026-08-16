@@ -26,13 +26,35 @@
 // Kept in a separate file so the upstream `src/` tree stays untouched and
 // mergeable against future pi-sap-aicore releases.
 
-import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 
 import { parseAndValidateServiceKey } from "./src/auth.ts";
 import type { SapModelCatalogController } from "./src/model-catalog-controller.ts";
 import { createSapProviders, FOUNDATION_PROVIDER_ID, SAP_PROVIDER_ID } from "./src/providers.ts";
 
 const AICORE_SERVICE_KEY_ENV = "AICORE_SERVICE_KEY";
+
+/** Stable source tag for our custom-API registrations (enables scoped cleanup). */
+const AICORE_CUSTOM_API_SOURCE_ID = "pi-sap-aicore";
+
+/**
+ * Where to find the *shared* `@oh-my-pi/pi-ai` custom-API registry. Mirrors the
+ * omp-permission-guard guardian's own `@oh-my-pi/pi-ai` resolution (bare package
+ * subpath first, then the global bun install by absolute path) so we register
+ * into the exact module instance those isolated `completeSimple` callers read.
+ */
+const PI_AI_API_REGISTRY_CANDIDATES = [
+	"@oh-my-pi/pi-ai/api-registry",
+	`${process.env.HOME ?? ""}/.bun/install/global/node_modules/@oh-my-pi/pi-ai/src/api-registry.ts`,
+];
+
+type CustomApiStreamSimpleFn = (
+	model: Model<Api>,
+	context: Context,
+	options?: SimpleStreamOptions,
+) => AssistantMessageEventStream;
+
+type RegisterCustomApiFn = (api: string, streamSimple: CustomApiStreamSimpleFn, sourceId?: string) => void;
 
 /**
  * Minimal structural view of omp's ExtensionAPI.registerProvider. We keep this
@@ -76,6 +98,7 @@ interface OmpProviderConfig {
 
 export interface OmpExtensionApi {
 	registerProvider(name: string, config: OmpProviderConfig): void;
+	logger?: { debug?: (...args: unknown[]) => void };
 }
 
 /**
@@ -208,6 +231,62 @@ function registerOne(
 }
 
 /**
+ * Make the SAP custom APIs dispatchable by any bare `@oh-my-pi/pi-ai`
+ * `stream`/`streamSimple`/`completeSimple` call — not just omp's registered
+ * ProviderConfig path.
+ *
+ * omp routes the main agent through `ProviderConfig.streamSimple`, so it never
+ * needs pi-ai's `model.api` dispatch. But peripheral consumers — notably the
+ * omp-permission-guard "guardian" judge — call `completeSimple(model, …)` on
+ * their own dynamically-imported copy of `@oh-my-pi/pi-ai`, which dispatches
+ * purely on `model.api` via `getCustomApi(api)` and otherwise falls through to a
+ * hardcoded switch that throws `Unhandled API in mapOptionsForApi: sap-aicore-*`.
+ *
+ * Registering each SAP api into that shared registry lets those callers stream
+ * SAP models natively. The handler is the same catalog-rehydrating, service-key-
+ * resolving `wrapStream` used for omp registration. Registration is additive:
+ * the check sits ahead of the switch, and omp's own SAP streaming does not use
+ * this path, so main-agent behavior is unchanged.
+ */
+async function registerSapCustomApis(
+	providers: { orchestration: UpstreamProvider; foundation: UpstreamProvider },
+	logger?: { debug?: (...args: unknown[]) => void },
+): Promise<void> {
+	const entries: { api: string; handler: CustomApiStreamSimpleFn }[] = [];
+	for (const provider of [providers.orchestration, providers.foundation]) {
+		const api = provider.getModels()[0]?.api;
+		if (api) entries.push({ api, handler: wrapStream(provider) as unknown as CustomApiStreamSimpleFn });
+	}
+	if (entries.length === 0) return;
+
+	// Register into every resolvable instance (bare subpath and/or the global
+	// install). If they resolve to the same module the second pass is a no-op
+	// (Map.set is idempotent); if they differ we cover whichever the isolated
+	// caller ends up importing.
+	let registeredInto = 0;
+	for (const spec of PI_AI_API_REGISTRY_CANDIDATES) {
+		let registerCustomApi: RegisterCustomApiFn | undefined;
+		try {
+			// Dynamic import is required: `@oh-my-pi/pi-ai` is a runtime host package,
+			// not a static dependency of this extension (it builds against
+			// `@earendil-works/pi-ai`), and one candidate is a runtime-resolved absolute
+			// path. A static import would fail to resolve at author/build time.
+			({ registerCustomApi } = (await import(spec)) as { registerCustomApi?: RegisterCustomApiFn });
+		} catch {
+			continue; // try next candidate
+		}
+		if (typeof registerCustomApi !== "function") continue;
+		for (const { api, handler } of entries) registerCustomApi(api, handler, AICORE_CUSTOM_API_SOURCE_ID);
+		registeredInto++;
+	}
+	if (registeredInto === 0) {
+		logger?.debug?.(
+			"pi-sap-aicore: @oh-my-pi/pi-ai custom-API registry unavailable; isolated completeSimple callers (e.g. permission-guard guardian) cannot stream SAP models",
+		);
+	}
+}
+
+/**
  * Register the SAP AI Core orchestration + foundation providers with omp.
  *
  * @param pi         The omp ExtensionAPI (structurally typed here).
@@ -231,6 +310,17 @@ export function registerSapProvidersForOmp(
 	registerOne(pi, providers.foundation as unknown as UpstreamProvider, {
 		withLogin: true,
 	});
+	// Also expose the SAP apis to isolated `@oh-my-pi/pi-ai` consumers (e.g. the
+	// permission-guard guardian's `completeSimple`). Fire-and-forget: the dynamic
+	// registry import resolves well before the first gated tool call. Registration
+	// failure is non-fatal and self-logged; omp's own SAP streaming is unaffected.
+	void registerSapCustomApis(
+		{
+			orchestration: providers.orchestration as unknown as UpstreamProvider,
+			foundation: providers.foundation as unknown as UpstreamProvider,
+		},
+		pi.logger,
+	);
 	void SAP_PROVIDER_ID;
 	void FOUNDATION_PROVIDER_ID;
 }
