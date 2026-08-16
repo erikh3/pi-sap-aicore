@@ -1,10 +1,10 @@
 diff --git a/node_modules/@sap-ai-sdk/ai-api/dist/utils/deployment-cache.js b/node_modules/@sap-ai-sdk/ai-api/dist/utils/deployment-cache.js
-index 12a439a..0fe8774 100644
+index d7eac08..69741e6 100644
 --- a/node_modules/@sap-ai-sdk/ai-api/dist/utils/deployment-cache.js
 +++ b/node_modules/@sap-ai-sdk/ai-api/dist/utils/deployment-cache.js
 @@ -1,4 +1,4 @@
 -import { Cache } from '@sap-cloud-sdk/connectivity/internal.js';
 +import { Cache } from '@sap-cloud-sdk/connectivity/dist/scp-cf/cache.js';
+ import {} from '../client/AI_CORE_API/index.js';
+ import {} from './deployment-resolver.js';
  import { extractModel } from './model.js';
- function getCacheKey({ scenarioId, executableId = '', model, resourceGroup = 'default' }) {
-     return `${scenarioId}:${executableId}:${model?.name ?? ''}:${model?.version ?? ''}:${resourceGroup}`;

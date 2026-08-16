@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the `@sap-ai-sdk/*` dependencies (`ai-api`, `core`,
+  `foundation-models`, `orchestration`) from 2.13.0 to 2.14.0. The release is an
+  additive minor (orchestration reasoning-content accessors, an `overrideConfig`
+  field on `OrchestrationConfigRef`, and a new Vertex AI embedding model) with no
+  breaking changes to the surfaces this extension uses. The orchestration
+  `ChatMessage` union gained a `DeveloperChatMessage` member, so
+  `piAssistantToOrchestration()` now declares its concrete `AssistantChatMessage`
+  return type instead of the wider union. Rebased the vendored `ai-api`
+  `deployment-cache.js` Cache-import patch onto 2.14.0.
+
 ### Fixed
 
 - Orchestration route no longer 400s with "Assistant message has neither text
