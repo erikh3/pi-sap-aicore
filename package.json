@@ -37,10 +37,10 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@sap-ai-sdk/ai-api": "2.13.0",
-    "@sap-ai-sdk/core": "2.13.0",
-    "@sap-ai-sdk/foundation-models": "2.13.0",
-    "@sap-ai-sdk/orchestration": "2.13.0"
+    "@sap-ai-sdk/ai-api": "2.14.0",
+    "@sap-ai-sdk/core": "2.14.0",
+    "@sap-ai-sdk/foundation-models": "2.14.0",
+    "@sap-ai-sdk/orchestration": "2.14.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.81.0",

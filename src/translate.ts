@@ -178,7 +178,7 @@ function piUserToOrchestration(msg: UserMessage): ChatMessage {
 	return { role: "user", content: items as UserChatMessageContent };
 }
 
-function piAssistantToOrchestration(msg: AssistantMessage): ChatMessage {
+function piAssistantToOrchestration(msg: AssistantMessage): AssistantChatMessage {
 	let text = "";
 	const toolCalls: NonNullable<AssistantChatMessage["tool_calls"]> = [];
 
