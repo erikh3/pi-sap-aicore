@@ -135,9 +135,10 @@ check(outputLimitFor("anthropic--claude-4.8-opus") === 128000, "explicit opus li
 check(outputLimitFor("anthropic--claude-4-sonnet") === 64000, "claude-4 family fallback");
 check(outputLimitFor("anthropic--claude-3-haiku") === 4096, "explicit haiku limit");
 check(outputLimitFor("gpt-5.6-terra") === 128000, "gpt-5 family fallback");
-check(outputLimitFor("gpt-4.1") === 32768, "gpt-4 explicit limit");
+check(outputLimitFor("gpt-4.1") === 32768, "gpt-4.1 falls back to gpt- family default");
 check(outputLimitFor("gemini-3.5-flash") === 65536, "gemini family fallback");
 check(outputLimitFor("qwen3.6-plus") === 32768, "qwen family fallback");
+check(outputLimitFor("gpt-4o") === 16384, "gpt-4o explicit exception (below gpt- fallback)");
 
 if (failures > 0) {
 	console.error(`\n${failures} tenant-model check(s) failed`);

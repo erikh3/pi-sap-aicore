@@ -312,9 +312,6 @@ const OUTPUT_LIMITS: Record<string, number> = {
 	"anthropic--claude-4.8-opus": 128000,
 	"gpt-4o": 16384,
 	"gpt-4o-mini": 16384,
-	"gpt-4.1": 32768,
-	"gpt-4.1-mini": 32768,
-	"gpt-4.1-nano": 32768,
 };
 
 export function outputLimitFor(id: string): number {
