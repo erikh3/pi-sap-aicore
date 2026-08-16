@@ -9,7 +9,15 @@
 // placeholder for them, which is itself whitespace-only and poisoned every
 // subsequent request in the conversation. The translators must drop those
 // messages (coalescing re-merges the neighbours) and never emit a text block
-// without non-whitespace text. This test makes no network calls.
+// without non-whitespace text.
+//
+// The orchestration translator (src/translate.ts) keeps messages 1:1 with
+// pi's log instead of dropping them, so it must emit a NON-whitespace
+// placeholder for empty/interrupted assistant turns. A whitespace placeholder
+// is trimmed away by Anthropic-on-Bedrock and re-triggers the 400 on every
+// following request — the failure seen when aborting a tool call mid-stream.
+//
+// This test makes no network calls.
 
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
@@ -21,6 +29,9 @@ const { piContextToBedrockConverse } = await import(
 );
 const { piContextToVertexGenerateContent } = await import(
 	pathToFileURL(join(ROOT, "src/translate-foundation-vertexai.ts")).href
+);
+const { piContextToOrchestration } = await import(
+	pathToFileURL(join(ROOT, "src/translate.ts")).href
 );
 
 let failures = 0;
@@ -214,6 +225,100 @@ console.log("Vertex: whitespace-only turns leave a valid degenerate payload");
 		payload.contents[0].parts[0].text.trim().length > 0,
 		"fallback text is non-whitespace",
 	);
+}
+
+// Orchestration (LLM Module) wraps the same Bedrock-backed models, so an
+// empty/interrupted assistant turn hits the identical "neither text nor
+// tool_use" 400. The orchestration translator keeps 1:1 message alternation
+// (it does not drop/coalesce), so it must emit a NON-whitespace placeholder
+// rather than the whitespace one that regressed this bug.
+function orchestrationAssistant(context) {
+	const { messages } = piContextToOrchestration(context);
+	return messages.find((message) => message.role === "assistant");
+}
+function orchestrationContentValid(message) {
+	const hasText =
+		typeof message.content === "string" && message.content.trim().length > 0;
+	const hasToolCalls = (message.tool_calls?.length ?? 0) > 0;
+	return hasText || hasToolCalls;
+}
+
+console.log("Orchestration: interrupted assistant turn (content: [])");
+{
+	const message = orchestrationAssistant({
+		messages: [{ role: "user", content: "hi" }, erroredAssistant],
+	});
+	check(
+		orchestrationContentValid(message),
+		"empty assistant turn gets non-whitespace text",
+	);
+	check(
+		typeof message.content === "string" &&
+			message.content.trim().length > 0 &&
+			!message.tool_calls,
+		"placeholder text, no phantom tool_calls",
+	);
+}
+
+console.log("Orchestration: whitespace-only text turn");
+{
+	const message = orchestrationAssistant({
+		messages: [
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: [{ type: "text", text: "   " }] },
+		],
+	});
+	check(
+		orchestrationContentValid(message),
+		"whitespace-only text is replaced, not sent verbatim",
+	);
+}
+
+console.log("Orchestration: thinking-only assistant turn");
+{
+	const message = orchestrationAssistant({
+		messages: [{ role: "user", content: "hi" }, thinkingOnlyAssistant],
+	});
+	check(
+		orchestrationContentValid(message),
+		"thinking-only turn gets non-whitespace text",
+	);
+}
+
+console.log("Orchestration: tool-call turn keeps empty content, no placeholder");
+{
+	const message = orchestrationAssistant({
+		messages: [
+			{ role: "user", content: "run it" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "toolCall", id: "call_1", name: "tool", arguments: {} },
+				],
+				stopReason: "toolUse",
+			},
+		],
+	});
+	check(orchestrationContentValid(message), "tool_calls carry the turn");
+	check(
+		message.content === "" && message.tool_calls?.length === 1,
+		"no text placeholder injected when tool_calls exist",
+	);
+}
+
+console.log("Orchestration: real text turn is unchanged");
+{
+	const message = orchestrationAssistant({
+		messages: [
+			{ role: "user", content: "hi" },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "hello there" }],
+				stopReason: "stop",
+			},
+		],
+	});
+	check(message.content === "hello there", "text passes through verbatim");
 }
 
 if (failures > 0) {

@@ -31,15 +31,16 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test": "node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
-    "prepublishOnly": "tsc --noEmit && npm test"
+    "prepublishOnly": "tsc --noEmit && npm test",
+    "postinstall": "patch-package"
   },
   "dependencies": {
-    "@sap-ai-sdk/ai-api": "^2.12.0",
-    "@sap-ai-sdk/core": "^2.12.0",
-    "@sap-ai-sdk/foundation-models": "^2.12.0",
-    "@sap-ai-sdk/orchestration": "^2.12.0"
+    "@sap-ai-sdk/ai-api": "2.13.0",
+    "@sap-ai-sdk/core": "2.13.0",
+    "@sap-ai-sdk/foundation-models": "2.13.0",
+    "@sap-ai-sdk/orchestration": "2.13.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.81.0",
@@ -48,6 +49,7 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.81.1",
     "@earendil-works/pi-coding-agent": "^0.81.1",
+    "patch-package": "^8.0.1",
     "typescript": "^7.0.2"
   },
   "engines": {
