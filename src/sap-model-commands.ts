@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ScenarioApi } from "@sap-ai-sdk/ai-api";
 
-import { SAP_PROVIDER_ID } from "./auth.ts";
+import { readSharedServiceKeyFromStore } from "./auth.ts";
 import type { SapModelCatalogController } from "./model-catalog-controller.ts";
 import { userCachePath, userOverlayPath } from "./model-catalog.ts";
 import { ensureServiceKey, resolveResourceGroup } from "./stream.ts";
@@ -52,8 +52,8 @@ export function registerSapModelCommands(
 					}
 					case "discover": {
 						ctx.ui.setStatus("sap-models", "querying SAP tenant…");
-						const auth = await ctx.modelRegistry.getProviderAuth(SAP_PROVIDER_ID);
-						const key = ensureServiceKey(auth?.auth.apiKey);
+						const raw = readSharedServiceKeyFromStore();
+						const key = ensureServiceKey(raw);
 						const tenant = await tenantModelIds(key.raw);
 						await controller.refresh({ allowNetwork: false });
 						const catalog = controller.getCatalog();

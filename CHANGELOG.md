@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/sap-models discover` no longer crashes with
+  `ctx.modelRegistry.getProviderAuth is not a function` on Pi versions that
+  removed `ModelRegistry.getProviderAuth`. The command now reads the stored SAP
+  service key through `readStoredCredential` (the same credential path the
+  foundation provider uses) instead of the removed registry method.
+
 - Orchestration route no longer 400s with "Assistant message has neither text
   nor tool_use blocks" after an assistant turn is interrupted (for example when
   aborting a tool call mid-stream). The translator previously substituted a
