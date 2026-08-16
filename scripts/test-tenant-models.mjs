@@ -2,8 +2,10 @@
 
 import {
 	adaptTenantModel,
+	mergeSapModels,
 	outputLimitFor,
 	shouldIncludeTenantModel,
+	shouldUseCachedSnapshot,
 } from "../src/model-catalog.ts";
 
 let failures = 0;
@@ -107,6 +109,21 @@ const gemini = adaptTenantModel(
 check(gemini.reasoning === false, "gemini reasoning stays off (undocumented passthrough)");
 check(gemini.temperature === true, "non-gpt keeps temperature enabled");
 
+const qwenReasoning = adaptTenantModel(
+	resource("qwen3-max-thinking", {
+		contextLength: 262144,
+		capabilities: ["text-generation", "reasoning"],
+	}),
+);
+check(
+	qwenReasoning.reasoning === false,
+	"reasoning stays off for families reasoningParams does not implement (qwen)",
+);
+check(
+	!qwenReasoning.thinkingLevelMap,
+	"no thinking level map for unimplemented reasoning family",
+);
+
 console.log("Cost parsing");
 const opus = adaptTenantModel(
 	resource("anthropic--claude-4.8-opus", {
@@ -139,6 +156,38 @@ check(outputLimitFor("gpt-4.1") === 32768, "gpt-4.1 falls back to gpt- family de
 check(outputLimitFor("gemini-3.5-flash") === 65536, "gemini family fallback");
 check(outputLimitFor("qwen3.6-plus") === 32768, "qwen family fallback");
 check(outputLimitFor("gpt-4o") === 16384, "gpt-4o explicit exception (below gpt- fallback)");
+
+console.log("Empty-cache collapse guard");
+const freshEmptyCache = {
+	fetchedAt: new Date().toISOString(),
+	models: [],
+};
+const stalePackaged = {
+	fetchedAt: "2020-01-01T00:00:00.000Z",
+	models: [{ id: "gpt-5.5" }, { id: "anthropic--claude-4.8-opus" }],
+};
+check(
+	shouldUseCachedSnapshot(stalePackaged, freshEmptyCache) === false,
+	"a fresh but empty cache is not treated as usable",
+);
+const collapsed = mergeSapModels({
+	packaged: stalePackaged.models,
+	cache: shouldUseCachedSnapshot(stalePackaged, freshEmptyCache)
+		? freshEmptyCache.models
+		: undefined,
+});
+check(
+	collapsed.length === 2,
+	"empty tenant response falls back to packaged instead of collapsing to zero",
+);
+const populatedCache = {
+	fetchedAt: new Date().toISOString(),
+	models: [{ id: "gpt-5.6-sol" }],
+};
+check(
+	shouldUseCachedSnapshot(stalePackaged, populatedCache) === true,
+	"a fresh non-empty cache remains authoritative",
+);
 
 if (failures > 0) {
 	console.error(`\n${failures} tenant-model check(s) failed`);

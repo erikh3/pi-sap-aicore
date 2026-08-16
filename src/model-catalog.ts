@@ -213,12 +213,19 @@ function snapshotTimestamp(snapshot: SapModelsSnapshot | undefined): number | un
 	return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
-/** Persisted metadata may overlay the bundled snapshot only when it is not older. */
+/**
+ * Persisted metadata may overlay the bundled snapshot only when it is non-empty
+ * and not older. An empty `models` array is treated as "no usable cache": a
+ * transient empty tenant response (outage, wrong resource group, over-broad
+ * filter) writes `{count:0, models:[]}` with a fresh timestamp, and without this
+ * guard `mergeSapModels`'s `cache ?? packaged` base would pick the empty array
+ * (not nullish) and collapse the whole catalog to zero callable models.
+ */
 export function shouldUseCachedSnapshot(
 	packaged: SapModelsSnapshot,
 	cache: SapModelsSnapshot | undefined,
 ): boolean {
-	if (!cache?.models) return false;
+	if (!cache?.models?.length) return false;
 	const packagedAt = snapshotTimestamp(packaged);
 	const cacheAt = snapshotTimestamp(cache);
 	if (packagedAt === undefined || cacheAt === undefined) return true;
@@ -270,15 +277,17 @@ function latestVersion(
 	return versions.find((version) => version.isLatest) ?? versions[0];
 }
 
-// SAP orchestration accepts Anthropic's `thinking + output_config` and OpenAI's
-// `reasoning_effort`. Gemini's reasoning shape via SAP is undocumented, so we
-// leave reasoning OFF for gemini-* (mirrors the maintainer snapshot script);
-// otherwise pi's Shift+Tab cycle would silently no-op. If/when SAP confirms the
-// passthrough, wire it in stream.ts:reasoningParams and drop the gemini gate.
+// Only enable reasoning for families that stream.ts:reasoningParams actually
+// implements a passthrough for: Anthropic (`thinking + output_config`) and
+// OpenAI (`reasoning_effort`). Any other family (gemini, qwen, …) has no branch
+// there, so a `reasoning: true` here would give pi a Shift+Tab thinking cycle
+// that silently no-ops. Allowlist rather than blocklist so a future
+// reasoning-capable tenant model in an unhandled family does not regress.
+// When SAP confirms another family's shape, wire it in reasoningParams and add
+// it here.
 function supportsReasoning(id: string, capabilities: string[]): boolean {
 	if (!capabilities.includes("reasoning")) return false;
-	if (id.startsWith("gemini-")) return false;
-	return true;
+	return id.startsWith("anthropic--") || id.startsWith("gpt-");
 }
 
 // Parse the tenant `cost` array (`[{inputCost:"0.00367"},{outputCost:"..."}]`)
