@@ -483,6 +483,10 @@ type TurnResult = {
 	finishReason: string | undefined;
 	refusalText: string;
 	usage: TokenUsage | undefined;
+	// A streamed tool call whose arguments never finished (max_tokens hit
+	// mid-JSON). The streaming path sets this; the blocking path never
+	// truncates mid-call. `finishTurn` promotes it to a visible error.
+	truncatedToolCall?: boolean;
 };
 
 // SAP's `ChatDelta` schema is `{role?, content, refusal?, tool_calls?} & Record<string, any>`.
@@ -570,6 +574,31 @@ export function latchFinishReason(
 	if (next === "tool_calls" || next === "function_call") return next;
 	if (current === "tool_calls" || current === "function_call") return current;
 	return current ?? next;
+}
+
+// A streamed tool call whose JSON never closed: the model hit max_tokens
+// (finish_reason "length") mid-arguments, so the accumulated fragment fails to
+// parse. Dispatching it would run the tool with stale/empty arguments, which
+// downstream surfaces as a confusing schema violation. Detect it at stream end
+// so the finalizer can raise an actionable error instead.
+export function toolArgsTruncated(partialJson: string): boolean {
+	if (!partialJson) return false;
+	try {
+		JSON.parse(partialJson);
+		return false;
+	} catch {
+		return true;
+	}
+}
+
+export function truncatedToolCallError(finishReason: string | undefined): string {
+	const cause =
+		finishReason === "length"
+			? "the response hit max_tokens (finish_reason=length). Lower the " +
+				"thinking level or reduce output size and retry."
+			: `finish_reason=${finishReason ?? "unknown"}. The tool call was ` +
+				"dropped to avoid dispatching with incomplete arguments.";
+	return `Tool call arguments were incomplete when the stream ended: ${cause}`;
 }
 
 let lastValidatedKey: ValidatedKey | undefined;
@@ -690,6 +719,17 @@ export function streamSapAiCore(
 				if (result.refusalText) {
 					output.stopReason = "error";
 					output.errorMessage = `Model refused: ${result.refusalText}`;
+					stream.push({ type: "error", reason: "error", error: output });
+					stream.end();
+					return;
+				}
+
+				// A tool call whose JSON never closed (max_tokens hit
+				// mid-arguments) must not be dispatched with partial/stale
+				// arguments. Surface it as a visible, actionable error instead.
+				if (result.truncatedToolCall) {
+					output.stopReason = "error";
+					output.errorMessage = truncatedToolCallError(result.finishReason);
 					stream.push({ type: "error", reason: "error", error: output });
 					stream.end();
 					return;
@@ -992,34 +1032,36 @@ export function streamSapAiCore(
 			closeText();
 			closeThinking();
 
+			let truncatedToolCall = false;
 			for (const slot of toolSlots.values()) {
 				const block = output.content[slot.contentIndex];
-				if (block?.type === "toolCall") {
-					if (slot.partialJson) {
-						try {
-							block.arguments = JSON.parse(slot.partialJson);
-						} catch {
-							// Leave arguments as last successfully-parsed value
-						}
-					}
-					stream.push({
-						type: "toolcall_end",
-						contentIndex: slot.contentIndex,
-						toolCall: {
-							type: "toolCall",
-							id: block.id,
-							name: block.name,
-							arguments: block.arguments,
-						},
-						partial: output,
-					});
+				if (block?.type !== "toolCall") continue;
+				// Incomplete arguments JSON means the stream was cut mid-call.
+				// Skip emitting toolcall_end so the harness never dispatches a
+				// call with stale/empty arguments; finishTurn raises the error.
+				if (toolArgsTruncated(slot.partialJson)) {
+					truncatedToolCall = true;
+					continue;
 				}
+				if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
+				stream.push({
+					type: "toolcall_end",
+					contentIndex: slot.contentIndex,
+					toolCall: {
+						type: "toolCall",
+						id: block.id,
+						name: block.name,
+						arguments: block.arguments,
+					},
+					partial: output,
+				});
 			}
 
 			finishTurn({
 				finishReason: finishReason ?? response.getFinishReason(),
 				refusalText,
 				usage: response.getTokenUsage(),
+				truncatedToolCall,
 			});
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";

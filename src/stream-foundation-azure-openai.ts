@@ -23,6 +23,8 @@ import {
 	pickReasoning,
 	resolveResourceGroup,
 	type ToolCallSlot,
+	toolArgsTruncated,
+	truncatedToolCallError,
 } from "./stream.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToAzureOpenAi } from "./translate-foundation.ts";
@@ -288,28 +290,31 @@ export function streamSapFoundationAzureOpenAi(
 			closeText();
 			closeThinking();
 
+			const resolvedFinishReason =
+				finishReason ?? response.getFinishReason() ?? undefined;
+			let truncatedToolCall = false;
 			for (const slot of toolSlots.values()) {
 				const block = output.content[slot.contentIndex];
-				if (block?.type === "toolCall") {
-					if (slot.partialJson) {
-						try {
-							block.arguments = JSON.parse(slot.partialJson);
-						} catch {
-							// Leave arguments as last successfully-parsed value
-						}
-					}
-					stream.push({
-						type: "toolcall_end",
-						contentIndex: slot.contentIndex,
-						toolCall: {
-							type: "toolCall",
-							id: block.id,
-							name: block.name,
-							arguments: block.arguments,
-						},
-						partial: output,
-					});
+				if (block?.type !== "toolCall") continue;
+				// Incomplete arguments JSON means the stream was cut mid-call.
+				// Skip emitting toolcall_end so the harness never dispatches a
+				// call with stale/empty arguments; the error path handles it.
+				if (toolArgsTruncated(slot.partialJson)) {
+					truncatedToolCall = true;
+					continue;
 				}
+				if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
+				stream.push({
+					type: "toolcall_end",
+					contentIndex: slot.contentIndex,
+					toolCall: {
+						type: "toolCall",
+						id: block.id,
+						name: block.name,
+						arguments: block.arguments,
+					},
+					partial: output,
+				});
 			}
 
 			const usage = response.getTokenUsage();
@@ -328,10 +333,18 @@ export function streamSapFoundationAzureOpenAi(
 				return;
 			}
 
+			// A tool call whose JSON never closed (max_tokens hit mid-arguments)
+			// must not be dispatched with partial/stale arguments.
+			if (truncatedToolCall) {
+				output.stopReason = "error";
+				output.errorMessage = truncatedToolCallError(resolvedFinishReason);
+				stream.push({ type: "error", reason: "error", error: output });
+				stream.end();
+				return;
+			}
+
 			output.stopReason = mapFinishReason(
-				toolSlots.size > 0
-					? "tool_calls"
-					: (finishReason ?? response.getFinishReason() ?? undefined),
+				toolSlots.size > 0 ? "tool_calls" : resolvedFinishReason,
 			);
 			stream.push({
 				type: "done",
