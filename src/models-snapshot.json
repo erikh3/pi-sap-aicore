@@ -1,8 +1,150 @@
 {
   "source": "https://models.dev/api.json",
-  "fetchedAt": "2026-06-04T14:51:56.824Z",
-  "count": 16,
+  "fetchedAt": "2026-08-16T21:59:35.625Z",
+  "count": 28,
   "models": [
+    {
+      "id": "anthropic--claude-3-haiku",
+      "name": "anthropic--claude-3-haiku",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 200000,
+        "output": 4096
+      },
+      "cost": {
+        "input": 0.25,
+        "output": 1.25,
+        "cacheRead": 0.03,
+        "cacheWrite": 0.3
+      }
+    },
+    {
+      "id": "anthropic--claude-3-opus",
+      "name": "anthropic--claude-3-opus",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 200000,
+        "output": 4096
+      },
+      "cost": {
+        "input": 15,
+        "output": 75,
+        "cacheRead": 1.5,
+        "cacheWrite": 18.75
+      }
+    },
+    {
+      "id": "anthropic--claude-3-sonnet",
+      "name": "anthropic--claude-3-sonnet",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 200000,
+        "output": 4096
+      },
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "anthropic--claude-3.5-sonnet",
+      "name": "anthropic--claude-3.5-sonnet",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 200000,
+        "output": 8192
+      },
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "anthropic--claude-3.7-sonnet",
+      "name": "anthropic--claude-3.7-sonnet",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      },
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
     {
       "id": "anthropic--claude-4-opus",
       "name": "anthropic--claude-4-opus",
@@ -276,6 +418,40 @@
       }
     },
     {
+      "id": "anthropic--claude-4.8-opus",
+      "name": "anthropic--claude-4.8-opus",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": false,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
+    {
       "id": "gemini-2.5-flash",
       "name": "gemini-2.5-flash",
       "reasoning": false,
@@ -353,6 +529,140 @@
         "input": 1.25,
         "output": 10,
         "cacheRead": 0.125,
+        "cacheWrite": 0
+      }
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "name": "gemini-3.1-flash-lite",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "cost": {
+        "input": 0.25,
+        "output": 1.5,
+        "cacheRead": 0.025,
+        "cacheWrite": 0
+      }
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "gemini-3.5-flash",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "cost": {
+        "input": 1.5,
+        "output": 9,
+        "cacheRead": 0.15,
+        "cacheWrite": 0
+      }
+    },
+    {
+      "id": "gpt-4.1",
+      "name": "gpt-4.1",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "cost": {
+        "input": 2,
+        "output": 8,
+        "cacheRead": 0.32,
+        "cacheWrite": 0
+      }
+    },
+    {
+      "id": "gpt-4.1-mini",
+      "name": "gpt-4.1-mini",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "cost": {
+        "input": 0.4,
+        "output": 1.6,
+        "cacheRead": 0.1,
+        "cacheWrite": 0
+      }
+    },
+    {
+      "id": "gpt-4.1-nano",
+      "name": "gpt-4.1-nano",
+      "reasoning": false,
+      "tool_call": true,
+      "temperature": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "cost": {
+        "input": 0.08,
+        "output": 0.26,
+        "cacheRead": 0,
         "cacheWrite": 0
       }
     },
@@ -445,6 +755,39 @@
         "input": 0.05,
         "output": 0.4,
         "cacheRead": 0.005,
+        "cacheWrite": 0
+      },
+      "thinkingLevelMap": {
+        "minimal": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5.2",
+      "name": "gpt-5.2",
+      "reasoning": true,
+      "tool_call": true,
+      "temperature": false,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "limit": {
+        "context": 400000,
+        "output": 128000
+      },
+      "cost": {
+        "input": 1.25,
+        "output": 9.44,
+        "cacheRead": 0.12,
         "cacheWrite": 0
       },
       "thinkingLevelMap": {

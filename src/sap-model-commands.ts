@@ -1,10 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ScenarioApi } from "@sap-ai-sdk/ai-api";
 
-import { readSharedServiceKeyFromStore } from "./auth.ts";
 import type { SapModelCatalogController } from "./model-catalog-controller.ts";
 import { userCachePath, userOverlayPath } from "./model-catalog.ts";
-import { ensureServiceKey, resolveResourceGroup } from "./stream.ts";
+import { queryTenantModels } from "./tenant-models.ts";
 
 function formatModelList(ids: string[], max = 30): string {
 	if (ids.length === 0) return "none";
@@ -13,14 +11,8 @@ function formatModelList(ids: string[], max = 30): string {
 	return `${head}${rest}`;
 }
 
-async function tenantModelIds(serviceKey: string): Promise<Set<string>> {
-	const key = ensureServiceKey(serviceKey);
-	process.env.AICORE_SERVICE_KEY = key.raw;
-	const resourceGroup = resolveResourceGroup(key) ?? "default";
-	const response = await ScenarioApi.scenarioQueryModels("foundation-models", {
-		"AI-Resource-Group": resourceGroup,
-	}).execute();
-	const resources = response?.resources ?? [];
+async function tenantModelIds(): Promise<Set<string>> {
+	const resources = await queryTenantModels();
 	return new Set(resources.map((resource) => resource.model));
 }
 
@@ -52,9 +44,7 @@ export function registerSapModelCommands(
 					}
 					case "discover": {
 						ctx.ui.setStatus("sap-models", "querying SAP tenant…");
-						const raw = readSharedServiceKeyFromStore();
-						const key = ensureServiceKey(raw);
-						const tenant = await tenantModelIds(key.raw);
+						const tenant = await tenantModelIds();
 						await controller.refresh({ allowNetwork: false });
 						const catalog = controller.getCatalog();
 						const known = new Set(catalog.models.map((model) => model.id));

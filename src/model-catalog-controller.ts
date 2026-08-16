@@ -1,11 +1,11 @@
 import {
-	fetchModelsDevSapSnapshot,
 	loadModelCatalog,
 	type LoadedSapModelCatalog,
 	type SapModelsSnapshot,
 	userCachePath,
 	writeJsonFile,
 } from "./model-catalog.ts";
+import { fetchTenantSapSnapshot } from "./tenant-models.ts";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
@@ -38,7 +38,7 @@ export function createSapModelCatalogController(
 	options: SapModelCatalogControllerOptions = {},
 ): SapModelCatalogController {
 	const loadCatalog = options.loadCatalog ?? loadModelCatalog;
-	const fetchSnapshot = options.fetchSnapshot ?? fetchModelsDevSapSnapshot;
+	const fetchSnapshot = options.fetchSnapshot ?? fetchTenantSapSnapshot;
 	const writeSnapshot = options.writeSnapshot ?? ((snapshot) => writeJsonFile(userCachePath(), snapshot));
 	const now = options.now ?? Date.now;
 	const refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;

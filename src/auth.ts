@@ -40,7 +40,8 @@ export function parseAndValidateServiceKey(raw: string): ValidatedKey {
 		throw new Error(
 			"SAP AI Core key must be the full BTP service-key JSON, not a " +
 				"plain string. Get it from BTP cockpit → AI Core service " +
-				`instance → Service Keys → View. Got: ${raw.slice(0, 40)}...`,
+				`instance → Service Keys → View. Received ${raw.length} characters ` +
+				"that were not valid JSON.",
 		);
 	}
 

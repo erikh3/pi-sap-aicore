@@ -204,13 +204,20 @@ The model list is composed of three sources, merged at startup:
    ```
 
    This re-fetches the live catalog, applies our family-specific filters
-   (currently anthropic claude-4.x, gpt-5*, gemini-2.5*), and writes the
-   snapshot to disk. Commit the result.
+   (currently `anthropic--claude-*`, `gpt-*`, `gemini-*`, `qwen*`, excluding
+   embedding models), and writes the snapshot to disk. Commit the result. This
+   snapshot is only the auth-free bootstrap used before the first authenticated
+   refresh; at runtime the tenant query below fully replaces it.
 
-2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine public
-   catalog cache. Pi 0.81 refreshes authenticated providers in the background
-   when `/model` opens and through `pi update --models`; checks are throttled for
-   four hours. Force an immediate refresh inside pi with:
+2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine catalog
+   cache, populated from your **live SAP AI Core tenant** (the
+   `foundation-models` scenario via `scenarioQueryModels`). This is the
+   authoritative set of models your subscription can actually call: it fully
+   replaces the bundled snapshot rather than unioning with it, so public-catalog
+   entries your tenant does not expose never appear as uncallable phantoms. Pi
+   0.81 refreshes authenticated providers in the background when `/model` opens
+   and through `pi update --models`; checks are throttled for four hours. Force
+   an immediate refresh inside pi with:
 
    ```text
    /sap-models update
@@ -221,10 +228,11 @@ The model list is composed of three sources, merged at startup:
    immediately, without re-registration or `/reload`. A cache older than the
    bundled snapshot is ignored after extension upgrades.
 
-3. **`~/.pi/agent/pi-sap-aicore/models.json`** — per-machine tenant overlay.
-   Use it for models in your tenant that are not in the public catalog yet,
-   model overrides, exclusions, and foundation-route enablement. Overlay models
-   win over cache/snapshot on duplicate `id`.
+3. **`~/.pi/agent/pi-sap-aicore/models.json`** — per-machine overlay. Use it for
+   cost calibration (the tenant reports CU prices for most models but leaves
+   some at 0), out-of-family models, model overrides, exclusions, and
+   foundation-route enablement. Overlay models win over cache/snapshot on
+   duplicate `id`.
 
 Example overlay:
 
@@ -269,7 +277,7 @@ Run these inside pi after installing/loading the extension:
 
 | Command | What it does |
 | --- | --- |
-| `/sap-models update` | Forces the latest public SAP AI Core model metadata from models.dev into `~/.pi/agent/pi-sap-aicore/models-cache.json` and updates both live Provider views. |
+| `/sap-models update` | Queries your live SAP AI Core tenant (`foundation-models` scenario), writes the filtered chat-model set to `~/.pi/agent/pi-sap-aicore/models-cache.json`, and updates both live Provider views. Requires a configured service key. |
 | `/sap-models discover` | Uses your configured SAP service key to query the tenant's `foundation-models` scenario, then reports models that are missing from the local catalog and catalog entries absent from the tenant. Honors `AICORE_RESOURCE_GROUP` / service-key `resourceGroup`. |
 | `/sap-models list` | Shows how many orchestration models and foundation-enabled models are currently loaded after snapshot/cache/overlay merging. |
 | `/sap-models paths` | Prints the cache and overlay file paths for this machine. |
@@ -333,9 +341,11 @@ Minimal foundation enablement for a model already in the catalog:
 }
 ```
 
-The `cost` fields are vendor list prices (USD per million tokens) from
-models.dev. Used **only** for pi's in-UI cost display — your actual SAP
-BTP invoice is contract-based and will differ.
+The `cost` fields come from your tenant's reported CU prices (SAP Capacity
+Units per million tokens), populated automatically by `/sap-models update`.
+Some models report `0` — supply real values via the overlay `overrides` if you
+want accurate in-UI cost display. Used **only** for pi's cost display; your
+actual SAP BTP invoice is contract-based and will differ.
 
 ## Thinking levels
 
