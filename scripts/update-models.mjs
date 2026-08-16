@@ -72,10 +72,12 @@ function adapt(model) {
 }
 
 function shouldInclude(id) {
+	if (id.includes("embed")) return false;
 	return (
-		id.startsWith("anthropic--claude-4") ||
-		id.startsWith("gpt-5") ||
-		id.startsWith("gemini-2.5")
+		id.startsWith("anthropic--claude-") ||
+		id.startsWith("gpt-") ||
+		id.startsWith("gemini-") ||
+		id.startsWith("qwen")
 	);
 }
 

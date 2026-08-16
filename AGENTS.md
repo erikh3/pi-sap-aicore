@@ -13,8 +13,12 @@ model provider). Read this before making changes.
 
 The model catalog is a layered **snapshot / cache / overlay**:
 
-- `src/models-snapshot.json` — bundled snapshot
-- `~/.pi/agent/pi-sap-aicore/models-cache.json` — runtime cache
+- `src/models-snapshot.json` — bundled snapshot; auth-free bootstrap generated
+  from models.dev by `scripts/update-models.mjs`. Fallback only; the tenant
+  cache fully replaces it once fetched.
+- `~/.pi/agent/pi-sap-aicore/models-cache.json` — runtime cache, sourced from
+  the live SAP tenant (`scenarioQueryModels`) via `src/tenant-models.ts`. This
+  is the authoritative set of callable models.
 - `models.json` — overlay with `models` / `overrides` / `exclude` /
   `foundation.enabledModelIds`
 
