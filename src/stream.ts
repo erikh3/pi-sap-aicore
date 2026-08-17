@@ -489,24 +489,21 @@ type TurnResult = {
 	truncatedToolCall?: boolean;
 };
 
-// SAP's `ChatDelta` schema is `{role?, content, refusal?, tool_calls?} & Record<string, any>`.
-// The Record<string,any> is a deliberate passthrough for vendor-native
-// streaming fields. The SDK only exposes `getDeltaContent()` and
-// `getDeltaToolCalls()`; everything else we have to dig out of
-// `findChoiceByIndex(0)?.delta` ourselves.
+// SAP's `ChatDelta` schema is `{role?, content, refusal?, tool_calls?,
+// reasoning_content?} & Record<string, any>`. The Record<string,any> is a
+// deliberate passthrough for vendor-native streaming fields.
 //
-// EMPIRICAL FINDING (2026-05-16, opus 4.6 + gpt-5-mini): SAP orchestration
-// does NOT pass reasoning/thinking content through. Deltas contain only
-// `role` and `content`. The model genuinely reasons (token usage reflects
-// it, and step-by-step structure leaks into the visible text), but the
-// structured thinking block pi expects to render in its UI panel never
-// arrives. Refusals also weren't observed; OpenAI moderation may inline
-// them into `content` rather than `refusal`.
+// Reasoning content: SAP orchestration (@sap-ai-sdk/orchestration >= 2.x)
+// streams it as `reasoning_content: ReasoningBlock[]`, exposed by the typed
+// `chunk.getDeltaReasoningContent()` accessor — that is the path the stream
+// loop drives pi's thinking_start/delta/end events from. The string-shaped
+// fields modelled on ExtendedDelta below are the fallback for OpenAI-compatible
+// routes (DeepSeek, some gpt-5 passthroughs) that instead inline reasoning as a
+// plain string on the delta; `pickReasoning` handles those.
 //
-// We keep the `pickReasoning` / refusal machinery below in place anyway:
-// (a) it's a few function calls per chunk, (b) if SAP ever flips a switch
-// to expose reasoning text, our extension picks it up with no further
-// changes. Don't be tempted to delete it as "dead code".
+// Refusals weren't observed on SAP turns; OpenAI moderation may inline them
+// into `content` rather than `refusal`. Refusal accumulation stays as a cheap
+// defense in case SAP starts surfacing it.
 export type ExtendedDelta = {
 	content?: string | null;
 	refusal?: string | null;
@@ -574,6 +571,29 @@ export function latchFinishReason(
 	if (next === "tool_calls" || next === "function_call") return next;
 	if (current === "tool_calls" || current === "function_call") return current;
 	return current ?? next;
+}
+
+// Pick the reasoning delta for one chunk. SAP orchestration streams native
+// reasoning as `reasoning_content: ReasoningBlock[]`, surfaced by the SDK's
+// typed `getDeltaReasoningContent()` (passed in as `blocks`) — that is the
+// authoritative source. OpenAI-compatible routes (DeepSeek, some gpt-5
+// passthroughs) instead inline reasoning as a plain string on the delta;
+// `pickReasoning` covers those and latches its field to avoid double-counting
+// providers that echo the same text on two keys. `blocks` of only empty
+// strings (`getDeltaReasoningContent` maps missing content to "") is treated
+// as absent so the string fallback still gets a chance.
+export function selectReasoningDelta(
+	blocks: string[] | undefined,
+	rawDelta: ExtendedDelta,
+	preferredField: string | undefined,
+): { text: string; field: string | undefined } | undefined {
+	if (blocks && blocks.length > 0) {
+		const text = blocks.join("");
+		if (text.length > 0) return { text, field: preferredField };
+	}
+	const picked = pickReasoning(rawDelta, preferredField);
+	if (picked) return { text: picked.text, field: picked.field };
+	return undefined;
 }
 
 // A streamed tool call whose JSON never closed: the model hit max_tokens
@@ -911,13 +931,17 @@ export function streamSapAiCore(
 				const choice = chunk.findChoiceByIndex(0);
 				const rawDelta = (choice?.delta ?? {}) as ExtendedDelta;
 
-				// Reasoning first — most providers emit reasoning chunks
-				// before the visible text, and pi's UI expects a
-				// thinking block to precede the text block in
-				// output.content ordering.
-				const reasoning = pickReasoning(rawDelta, reasoningField);
-				if (reasoning) {
-					reasoningField = reasoning.field;
+				// Reasoning first — providers emit reasoning chunks before the
+				// visible text, and pi's UI expects a thinking block to precede
+				// the text block in output.content ordering.
+				const reasoning = selectReasoningDelta(
+					chunk.getDeltaReasoningContent(),
+					rawDelta,
+					reasoningField,
+				);
+				const reasoningText = reasoning?.text;
+				if (reasoning) reasoningField = reasoning.field;
+				if (reasoningText) {
 					if (thinkingIndex < 0) {
 						closeText();
 						output.content.push({ type: "thinking", thinking: "" });
@@ -930,11 +954,11 @@ export function streamSapAiCore(
 					}
 					const block = output.content[thinkingIndex];
 					if (block?.type === "thinking") {
-						block.thinking += reasoning.text;
+						block.thinking += reasoningText;
 						stream.push({
 							type: "thinking_delta",
 							contentIndex: thinkingIndex,
-							delta: reasoning.text,
+							delta: reasoningText,
 							partial: output,
 						});
 					}

@@ -21,6 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reasoning/thinking now streams through on the orchestration (`sap-aicore`)
+  route. SAP orchestration (`@sap-ai-sdk/orchestration` >= 2.x) emits reasoning
+  as `reasoning_content: ReasoningBlock[]`, but the stream reader only accepted
+  string-shaped reasoning fields, so the array-shaped native content was
+  silently dropped and pi rendered no thinking block on `sap-aicore` turns. The
+  reader now prefers the SDK's typed `chunk.getDeltaReasoningContent()` accessor
+  (via a new `selectReasoningDelta` helper) and keeps the string-shaped
+  `pickReasoning` path as a fallback for OpenAI-compatible inline reasoning.
+  Added an offline regression test (`test-reasoning-delta.mjs`).
+
+- Silenced a spurious `ERROR (stream-util): ... token length exceeded` logged to
+  the terminal on healthy turns. The vendored orchestration SDK's
+  `handleFinishReason` (`util/stream.js`) logs at `error` level whenever any
+  streamed chunk carries `finish_reason: "length"` — which Anthropic adaptive
+  thinking emits transiently on an intermediate segment before finishing the
+  turn with `tool_calls`. Our finalizer already resolves that correctly, so the
+  SDK log was pure noise. A `patch-package` patch downgrades only the `length`
+  case to `debug`, leaving `content_filter` and unknown-reason errors intact.
+
 - `/sap-models discover` no longer crashes with
   `ctx.modelRegistry.getProviderAuth is not a function` on Pi versions that
   removed `ModelRegistry.getProviderAuth`. The command now reads the stored SAP
