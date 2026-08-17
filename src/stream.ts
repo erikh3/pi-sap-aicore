@@ -274,45 +274,74 @@ function isStreamingUnsupportedError(error: unknown): boolean {
 	return /streaming is not supported/i.test(formatError(error));
 }
 
-// EMPIRICAL FINDING (2026-05-16, verified across gpt-5-mini and
-// claude-4.5-sonnet): SAP orchestration strips all detail fields from
-// the TokenUsage response. We receive ONLY {prompt_tokens,
-// completion_tokens, total_tokens} — no `prompt_tokens_details`, no
-// `completion_tokens_details`, no Anthropic-style top-level
-// `cache_read_input_tokens`/`cache_creation_input_tokens`. So pi's
-// `cacheRead`/`cacheWrite` will always be 0 on SAP-routed turns,
-// regardless of whether the backend (OpenAI/Anthropic) actually cached.
-// SAP's own contract billing may give you a cache discount that isn't
-// visible to this client.
+// CACHE / INPUT TOKEN ACCOUNTING. Two things are load-bearing here and both
+// were confirmed against live SAP responses (blocking path, anthropic--claude-
+// 4.6-sonnet, PI_SAP_AICORE_CACHE_CONTROL=1):
 //
-// We KEEP the detail-field probes below for defense: if SAP ever flips
-// a switch to expose detail fields, the math is already correct. Pi's
-// convention is also the OPPOSITE of OpenAI's: `usage.input` is
-// non-cached prompt tokens only, with cached tokens accounted for
-// separately on `cacheRead`/`cacheWrite`. Don't "simplify" by setting
-// `input = prompt_tokens` — that would double-count cache hits if/when
-// SAP starts exposing them and inflate cost reporting by ~10× (cacheRead
-// is priced at 10% of input on Anthropic).
+// 1. TWO CONVENTIONS. SAP forwards each backend's NATIVE usage semantics inside
+//    the OpenAI-shaped envelope, and they disagree about whether cached tokens
+//    are part of `prompt_tokens`:
+//      - OpenAI (gpt-* via orchestration/Azure): `prompt_tokens` INCLUDES
+//        `prompt_tokens_details.cached_tokens`, and there is no cache-creation
+//        bucket. Non-cached input = prompt_tokens - cacheRead.
+//      - Anthropic (anthropic-* via orchestration/Bedrock): `prompt_tokens` is
+//        ONLY the non-cached input; `cached_tokens` and `cache_creation_tokens`
+//        are reported ADDITIVELY, not as a subset. Observed live:
+//        {prompt_tokens: 3, cached_tokens: 34217, cache_creation_tokens: 8991}
+//        for a ~43k-token prompt. Non-cached input = prompt_tokens as-is.
+//    Subtracting cache from an Anthropic `prompt_tokens` (the old OpenAI-only
+//    rule) drove `input` to 0 and lost ~43k tokens of cost. We detect the
+//    Anthropic shape by a cache-creation bucket (OpenAI never emits one) or a
+//    cacheRead that exceeds `prompt_tokens` (impossible if it were a subset).
+//    Pi's `usage.input` is non-cached-only either way, with cacheRead (~10% of
+//    input on Anthropic) and cacheWrite tracked separately.
+//
+// 2. STREAMING DROPS THE DETAILS. The SDK's streaming chunk merge
+//    (@sap-ai-sdk/orchestration/util/stream.js `mergeTokenUsage`) rebuilds usage
+//    with only {prompt_tokens, completion_tokens, total_tokens} and discards
+//    `prompt_tokens_details`. So on the DEFAULT streaming path cacheRead/
+//    cacheWrite are always 0 AND — for cached Anthropic turns — the bulk of the
+//    input (which lives in the stripped details) is invisible, understating
+//    tokens/cost by orders of magnitude. Only the non-streaming path
+//    (client.chatCompletion, forced via PI_SAP_AICORE_FORCE_BLOCKING=1) carries
+//    the detail fields, so it is the only route with accurate cached-turn
+//    accounting. This mapping is correct on both routes; streaming just has
+//    nothing to map.
+//
 // Accepts any OpenAI-shaped usage object — orchestration's `TokenUsage` OR the
-// foundation provider's `AzureOpenAiCompletionUsage`; both carry the same
-// prompt/completion fields. Kept structural so stream-foundation.ts can reuse
-// this without importing orchestration's `TokenUsage` type.
+// foundation provider's `AzureOpenAiCompletionUsage`. The Bedrock foundation
+// route (stream-foundation-bedrock.ts) maps its Anthropic usage onto the
+// top-level `cache_read_input_tokens`/`cache_creation_input_tokens` fields. Kept
+// structural so stream-foundation.ts can reuse it without importing SAP types.
 export type RawTokenUsage = {
 	prompt_tokens?: number;
 	completion_tokens?: number;
-	prompt_tokens_details?: { cached_tokens?: number } | null;
+	prompt_tokens_details?: {
+		cached_tokens?: number;
+		cache_creation_tokens?: number;
+	} | null;
 	cache_read_input_tokens?: number;
 	cache_creation_input_tokens?: number;
 };
 
 export function mapUsage(usage: RawTokenUsage): Usage {
-	const openAiCached = usage.prompt_tokens_details?.cached_tokens ?? 0;
-	const anthropicCached = usage.cache_read_input_tokens ?? 0;
-	// In practice these are mutually exclusive per route; max() is defensive.
-	const cacheRead = Math.max(openAiCached, anthropicCached);
-	const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+	// cacheRead: OpenAI nests it under prompt_tokens_details.cached_tokens; the
+	// Bedrock route uses the top-level Anthropic field. cacheWrite is
+	// Anthropic-only (nested on orchestration, top-level on Bedrock). max() is
+	// defensive — a given route populates exactly one location.
+	const cacheRead = Math.max(
+		usage.prompt_tokens_details?.cached_tokens ?? 0,
+		usage.cache_read_input_tokens ?? 0,
+	);
+	const cacheWrite = Math.max(
+		usage.prompt_tokens_details?.cache_creation_tokens ?? 0,
+		usage.cache_creation_input_tokens ?? 0,
+	);
 	const prompt = usage.prompt_tokens ?? 0;
-	const input = Math.max(0, prompt - cacheRead - cacheWrite);
+	// Anthropic reports cache buckets additively (prompt_tokens is already
+	// non-cached); OpenAI folds cacheRead into prompt_tokens. See note above.
+	const anthropicConvention = cacheWrite > 0 || cacheRead > prompt;
+	const input = anthropicConvention ? prompt : Math.max(0, prompt - cacheRead);
 	const output = usage.completion_tokens ?? 0;
 	return {
 		input,
@@ -731,6 +760,18 @@ export function streamSapAiCore(
 				if (result.usage) {
 					output.usage = mapUsage(result.usage);
 					calculateCost(model, output.usage);
+					// Surface what SAP actually returned so a live
+					// PI_SAP_AICORE_CACHE_CONTROL=1 probe can confirm whether the
+					// gateway now forwards prompt_tokens_details cache fields (raw)
+					// and how mapUsage split them (mapped). Token counts only — no
+					// prompt content. Same requestId as the "request" entry.
+					debugLog({
+						requestId,
+						kind: "usage",
+						model: model.id,
+						raw: result.usage as Record<string, unknown>,
+						mapped: output.usage,
+					});
 				}
 
 				// A refusal terminates the turn with no real content. Promote
@@ -862,8 +903,21 @@ export function streamSapAiCore(
 			// Stream by default; on SAP's "Streaming is not supported" 400 —
 			// and only before any chunk has been emitted — remember the model
 			// and fall back to the blocking path so the turn still completes.
+			//
+			// PI_SAP_AICORE_FORCE_BLOCKING=1 forces the non-streaming
+			// chatCompletion() path for every turn. Diagnostic/opt-in: the SDK's
+			// streaming chunk merge (mergeTokenUsage in
+			// @sap-ai-sdk/orchestration/util/stream.js) rebuilds TokenUsage with
+			// only {prompt_tokens, completion_tokens, total_tokens} and DROPS
+			// prompt_tokens_details/completion_tokens_details, and SAP's streamed
+			// prompt_tokens has been observed wildly undercounting (6 for a ~30k
+			// input). The blocking path reads final_result.usage directly, so it's
+			// the accurate source for usage/cost and the only route that can carry
+			// cache detail fields. Trades away token streaming for correct billing.
+			const forceBlocking =
+				process.env.PI_SAP_AICORE_FORCE_BLOCKING === "1";
 			let response: Awaited<ReturnType<typeof client.stream>> | undefined;
-			if (!STREAMING_UNSUPPORTED.has(model.id)) {
+			if (!forceBlocking && !STREAMING_UNSUPPORTED.has(model.id)) {
 				try {
 					response = await client.stream({ messages }, options?.signal, {
 						promptTemplating: { include_usage: true },

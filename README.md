@@ -423,35 +423,70 @@ deployment must live in the resolved group for name-based resolution to find the
 
 ## Prompt caching & cost reporting
 
-**Cache read/write tokens always report 0** on SAP-routed turns. SAP
-orchestration strips all detail fields from the TokenUsage response
-— we only get `prompt_tokens`, `completion_tokens`, and `total_tokens`
-across every route. There's no `prompt_tokens_details.cached_tokens`
-(OpenAI) and no top-level `cache_read_input_tokens` (Anthropic) for
-the client to read.
+Token accounting depends on **which route** runs, and the two facts below were
+confirmed against live SAP responses (`anthropic--claude-4.6-sonnet`).
 
-Whether the backend actually caches is invisible to pi. SAP's
-contract billing may give you a discount on cached tokens that this
-extension can't surface — check your BTP invoice if cache savings
-matter.
+### Two token conventions
 
-**Experimental:** `PI_SAP_AICORE_CACHE_CONTROL=1` tags the system
-prompt and last user message with Anthropic's `cache_control:
-{type:"ephemeral"}`. SAP may forward it (saving SAP money on the
-backend, possibly passed through via your contract) or may 400 the
-request. Either way, you won't see cacheRead become non-zero in pi's
-diagnostics — that requires SAP to expose detail fields, which they
-currently don't.
+SAP forwards each backend's *native* usage semantics inside the OpenAI-shaped
+envelope, and they disagree about whether cached tokens are part of
+`prompt_tokens`:
 
-OpenAI/Gemini routes ignore the flag — they have their own automatic
-caching with no breakpoint API.
+- **OpenAI** (`gpt-*`): `prompt_tokens` **includes** `prompt_tokens_details.cached_tokens`;
+  there is no cache-creation bucket. Non-cached `input = prompt_tokens - cacheRead`.
+- **Anthropic** (`anthropic--*`): `prompt_tokens` is **only** the non-cached input;
+  `cached_tokens` and `cache_creation_tokens` are reported **additively**. Observed
+  live: `{prompt_tokens: 3, cached_tokens: 34217, cache_creation_tokens: 8991}` for
+  a ~43k-token prompt. Non-cached `input = prompt_tokens` as-is.
 
-**Foundation route:** because direct foundation endpoints bypass orchestration's
-usage-stripping, provider-specific cache fields *may* come back populated.
-`mapUsage` reads OpenAI `prompt_tokens_details.cached_tokens` and Anthropic-style
-cache-read fields when SAP exposes them, so `cacheRead` could be non-zero on
-`sap-aicore-foundation/*` turns where orchestration always reports 0. Treat as
-best-effort and provider-dependent.
+`mapUsage` detects the Anthropic shape (a cache-creation bucket, which OpenAI never
+emits, or a `cacheRead` that exceeds `prompt_tokens`) and skips the subtraction.
+Getting this wrong drove Anthropic `input` to 0 and dropped the cached tokens from
+cost entirely.
+
+### Streaming drops the cache detail fields
+
+On the **default streaming path**, `cacheRead`/`cacheWrite` are **always 0** — not
+because SAP strips them, but because the SDK's streaming chunk merge
+(`@sap-ai-sdk/orchestration/util/stream.js` `mergeTokenUsage`) rebuilds usage with
+only `{prompt_tokens, completion_tokens, total_tokens}` and discards
+`prompt_tokens_details`. For a **cached Anthropic turn** this understates usage by
+orders of magnitude: the turn reports the tiny non-cached `prompt_tokens` (e.g. `3`)
+and the ~20k+ cached tokens are invisible.
+
+Consequence: **do not combine `PI_SAP_AICORE_CACHE_CONTROL=1` with streaming** — the
+cache discount won't be reflected and the cost line becomes fictional. Without cache
+control (the default), streaming usage is accurate (`input = prompt_tokens`, no
+cache).
+
+### Accurate cached-turn accounting: `PI_SAP_AICORE_FORCE_BLOCKING=1`
+
+The non-streaming `chatCompletion()` path reads `final_result.usage` directly (no
+lossy merge), so it **is** the only route that carries the cache detail fields.
+`PI_SAP_AICORE_FORCE_BLOCKING=1` forces every turn onto it. Pair it with
+`PI_SAP_AICORE_CACHE_CONTROL=1` to see real `cacheRead`/`cacheWrite` and correct
+cost — at the cost of token streaming (the reply arrives as one block).
+
+`PI_SAP_AICORE_CACHE_CONTROL=1` tags the system prompt and last user message with
+Anthropic's `cache_control: {type:"ephemeral"}`. SAP may forward it or may 400 the
+request depending on tenant/model. OpenAI/Gemini routes ignore the flag (they cache
+automatically with no breakpoint API).
+
+Cache-read/write **cost** only appears if your overlay sets `cost.cacheRead`/
+`cost.cacheWrite` — the tenant reports `0` for both. Either way, SAP's contract
+billing is separate; check your BTP invoice for the authoritative figure.
+
+> These are the only usage/cost signals the SAP SDKs expose per call. There is no
+> metering/billing API: `ai-api`'s `KPIApi` returns execution/deployment **counts**,
+> `MetricsApi` handles custom ML-training metrics, `ResourceQuotaApi` reports infra
+> replicas, and `AiModelVersion.cost` is a static CU rate card — none report billed
+> spend. Actual Capacity-Unit consumption lives in SAP BTP metering (subaccount,
+> delayed), not the AI Core API.
+
+**Foundation route** (`sap-aicore-foundation/*`): direct endpoints bypass
+orchestration entirely. The Bedrock adapter maps Anthropic's top-level
+`cache_read_input_tokens`/`cache_creation_input_tokens`; Azure OpenAI returns
+`prompt_tokens_details`. Both flow through the same dual-convention `mapUsage`.
 
 ## Releasing (maintainers)
 
