@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-18
+
+### Changed
+
+- Validated the native Provider implementation against pi 0.84.2 and updated the
+  development/CI baseline for `@earendil-works/pi-ai` and
+  `@earendil-works/pi-coding-agent` to 0.84.2. The minimum supported Pi version
+  remains 0.81.0.
+- Added a package-load/model-list compatibility smoke test and included it in the
+  prepublish verification gate.
+
 ## [0.4.1] - 2026-07-21
 
 ### Changed
@@ -295,7 +306,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...v0.4.0
 [0.3.8]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...v0.3.8
