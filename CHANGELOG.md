@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-26
+
+### Fixed
+
+- Fixed conversations getting permanently stuck on `An assistant message with
+  'tool_calls' must be followed by tool messages responding to each
+  'tool_call_id'`. Both providers now run pi's shared `transformMessages()`
+  helper over the conversation before translating it, the same way every
+  built-in pi API adapter does. It drops errored/aborted assistant turns —
+  a turn killed mid-stream by an SSE drop or an interrupt is persisted by pi
+  with the tool calls it had emitted and no results, and replaying it failed
+  *every* subsequent request in that session with the same ids — and it
+  synthesises results for tool calls orphaned any other way. It also downgrades
+  images for text-only models and normalises thinking blocks across a
+  mid-conversation model switch.
+- Fixed the orchestration translator splitting the tool-message block. A tool
+  result carrying an image is hoisted into a synthetic user message (SAP's
+  tool-message content schema is text-only), which produced
+  `tool, user(image), tool` and made the backend reject every tool_call_id past
+  the first. Tool results are now batched into one contiguous block in
+  `tool_calls` order, with hoisted images following it. The foundation
+  (Azure OpenAI) translator already did this; the orchestration path never got
+  the same fix.
+- An aborted stream is no longer reported to pi as a completed turn. The
+  orchestration and foundation Azure OpenAI streaming loops broke out of the
+  chunk loop on abort and then emitted `done`, persisting a half-built tool call
+  as a successful `toolUse` turn; they now mark the turn `aborted`, matching
+  pi's own adapters.
+- A tool call whose argument JSON never finished streaming — the model hit its
+  output cap mid-call, or the connection dropped — no longer executes with `{}`.
+  The parse failure was swallowed, so the tool ran with no arguments and no
+  error. Both OpenAI-shaped paths now use pi's tolerant `parseStreamingJson`,
+  which recovers the fields the model did emit; it also keeps `arguments` in step
+  with the stream, so pi renders a tool call's arguments as they arrive instead
+  of showing `{}` until the last fragment.
+- A streamed tool call that never received an id is now given one instead of
+  being sent with an empty `tool_call_id`, which failed the same way an
+  unanswered call did. The Bedrock path already did this.
+
+### Added
+
+- Added support for pi 0.84.3's `toolChoice` stream option. pi sets
+  `toolChoice: "none"` on its summarization/compaction turns; the extension
+  ignored it, so the model could answer a compaction request with tool calls —
+  which have no results and then break every following request. All four routes
+  now send no tools for `"none"`. That is the one encoding every backend here
+  understands: SAP documents orchestration's `tool_choice` only as an
+  unvalidated passthrough, and Bedrock's Converse `toolChoice` has no `"none"`
+  member. `"auto"` is every backend's default and needs no encoding.
+- Added a preflight check on both OpenAI-shaped request builders: an assistant
+  `tool_calls` message with an unanswered id now fails locally, naming the ids
+  and where the pairing broke, instead of spending a round trip to come back as
+  an opaque SAP 400. The message is worded so pi classifies it non-retryable —
+  a translation bug cannot succeed on a retry.
+- Added a Troubleshooting section to the README covering
+  `PI_SAP_AICORE_DEBUG_PAYLOAD` request capture (previously undocumented), the
+  tool_call_id error above, streaming-unsupported models, and the full
+  environment-variable reference.
+
+### Changed
+
+- Validated against pi 0.84.3 and moved the development/CI baseline to it. The
+  minimum supported pi version remains 0.81.0: `toolChoice` is simply absent on
+  older pi versions, and the extension behaves exactly as before when it is.
+
 ## [0.4.2] - 2026-08-18
 
 ### Changed
@@ -306,7 +371,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...v0.4.0

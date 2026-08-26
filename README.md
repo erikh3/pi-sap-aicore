@@ -9,7 +9,7 @@ and share one login, so you pick the route per model. See
 
 ## Prerequisites
 
-- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 0.84.2**
+- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 0.84.3**
 - Node.js **22.19.0 or newer**
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
@@ -442,6 +442,55 @@ usage-stripping, provider-specific cache fields *may* come back populated.
 cache-read fields when SAP exposes them, so `cacheRead` could be non-zero on
 `sap-aicore-foundation/*` turns where orchestration always reports 0. Treat as
 best-effort and provider-dependent.
+
+## Troubleshooting
+
+### Capturing the request payload
+
+SAP's error bodies rarely echo what was sent, so a server-side failure (a 500
+from the LLM Module, an unexpected 400) often can't be diagnosed from the error
+text alone. Point `PI_SAP_AICORE_DEBUG_PAYLOAD` at a file to append one JSON
+line per request and one per error, both keyed by the same `requestId`:
+
+```bash
+PI_SAP_AICORE_DEBUG_PAYLOAD=/tmp/sap-aicore.jsonl pi
+```
+
+Then find the request behind a failure:
+
+```bash
+grep '"kind":"error"' /tmp/sap-aicore.jsonl | tail -1   # note its requestId
+grep '<requestId>' /tmp/sap-aicore.jsonl
+```
+
+> [!WARNING]
+> The log contains your full system prompt and conversation. Review it before
+> attaching it to an issue.
+
+### `An assistant message with 'tool_calls' must be followed by tool messages`
+
+A turn killed mid-stream — a dropped SSE connection, or an interrupt while tool
+calls were in flight — leaves tool calls with no results. Versions up to and
+including 0.4.2 replayed those on every later request, so once it happened the session failed
+the same way until it was abandoned. Upgrade to 0.4.3 or newer: incomplete turns
+are no longer replayed, so an affected session recovers on its next request and
+there is nothing to clean up by hand.
+
+### A model returns 400 only when streaming
+
+SAP orchestration keeps its own per-model streaming allow-list that lags behind
+the Model Library's "Streaming Support" flag. The extension carries a list of
+known-unsupported models and falls back to a single blocking call for them; if
+you hit a new one, please open an issue with the model id.
+
+### Other environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `AICORE_SERVICE_KEY` | Service-key JSON override for one shell, bypassing pi's auth store. |
+| `AICORE_RESOURCE_GROUP` | Overrides the resource group for one shell. See [AI Resource Group](#ai-resource-group). |
+| `PI_SAP_AICORE_DEBUG_PAYLOAD` | Request/error log file — see above. |
+| `PI_SAP_AICORE_CACHE_CONTROL` | Set to `1` to probe Anthropic prompt caching. See [Prompt caching](#prompt-caching--cost-reporting). |
 
 ## Releasing (maintainers)
 

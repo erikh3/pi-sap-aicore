@@ -20,6 +20,7 @@ import {
 	mapUsage,
 	resolveResourceGroup,
 } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToBedrockConverse } from "./translate-foundation-bedrock.ts";
 
@@ -88,7 +89,9 @@ export function streamSapFoundationBedrock(
 				resourceGroup,
 			});
 
-			const translated = piContextToBedrockConverse(context);
+			const translated = piContextToBedrockConverse(
+				normalizeContext(context, model, options),
+			);
 			const maxTokens = options?.maxTokens ?? model.maxTokens;
 			const request = {
 				...translated,

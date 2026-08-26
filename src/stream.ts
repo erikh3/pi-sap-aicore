@@ -11,6 +11,7 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
+	parseStreamingJson,
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
@@ -18,6 +19,7 @@ import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
 import { parseAndValidateServiceKey, type ValidatedKey } from "./auth.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
 // `@sap-ai-sdk/orchestration` is loaded dynamically (not at module load) so a
@@ -637,7 +639,9 @@ export function streamSapAiCore(
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
 
-			const { messages, tools } = piContextToOrchestration(context);
+			const { messages, tools } = piContextToOrchestration(
+				normalizeContext(context, model, options),
+			);
 
 			const { OrchestrationClient } = await importOrchestration();
 			const llmParams = buildLlmParams(model, options, tools.length > 0);
@@ -750,18 +754,15 @@ export function streamSapAiCore(
 				}
 
 				for (const tc of blocking.getToolCalls() ?? []) {
-					let parsedArgs: Record<string, unknown> = {};
-					if (tc.function.arguments) {
-						try {
-							parsedArgs = JSON.parse(tc.function.arguments);
-						} catch {
-							// Model emitted invalid JSON — leave args empty rather
-							// than crash; mirrors the streaming path's tolerance.
-						}
-					}
+					// Tolerant parse for the same reason as the streaming path: a
+					// truncated argument object should degrade to the fields the model
+					// did emit, not to `{}`.
+					const parsedArgs = tc.function.arguments
+						? parseStreamingJson(tc.function.arguments)
+						: {};
 					output.content.push({
 						type: "toolCall",
-						id: tc.id,
+						id: tc.id || randomUUID(),
 						name: tc.function.name,
 						arguments: parsedArgs,
 					});
@@ -970,11 +971,12 @@ export function streamSapAiCore(
 							const fragment = td.function?.arguments ?? "";
 							if (fragment) {
 								slot.partialJson += fragment;
-								try {
-									block.arguments = JSON.parse(slot.partialJson);
-								} catch {
-									// Partial JSON — keep accumulating until valid
-								}
+								// pi's tolerant parser closes the open strings/arrays/
+								// objects of a half-streamed fragment, so `arguments`
+								// tracks the call as it arrives (a plain JSON.parse only
+								// succeeds on the final fragment, leaving pi's UI showing
+								// `{}` for the whole call). Matches pi's own adapters.
+								block.arguments = parseStreamingJson(slot.partialJson);
 								stream.push({
 									type: "toolcall_delta",
 									contentIndex: slot.contentIndex,
@@ -989,6 +991,15 @@ export function streamSapAiCore(
 				finishReason = latchFinishReason(finishReason, chunk.getFinishReason());
 			}
 
+			// The loop `break`s on abort with whatever it had streamed so far —
+			// usually a half-built tool call the agent will never execute. Emitting
+			// `done` here would persist that as a completed toolUse turn whose
+			// tool_call_ids no tool message ever answers, which is exactly what SAP
+			// rejects on the next request. pi's own adapters throw here; the catch
+			// below then marks the turn `aborted`, and pi's transformMessages()
+			// drops aborted turns from the replayed history.
+			if (options?.signal?.aborted) throw new Error("Request was aborted");
+
 			closeText();
 			closeThinking();
 
@@ -996,12 +1007,18 @@ export function streamSapAiCore(
 				const block = output.content[slot.contentIndex];
 				if (block?.type === "toolCall") {
 					if (slot.partialJson) {
-						try {
-							block.arguments = JSON.parse(slot.partialJson);
-						} catch {
-							// Leave arguments as last successfully-parsed value
-						}
+						// A tool call whose argument JSON never completed (the model hit
+						// its output cap mid-call, or the SSE stream dropped) used to
+						// fall back to `{}` and get executed with no arguments at all —
+						// silently, since the parse failure was swallowed. Recover what
+						// was streamed instead.
+						block.arguments = parseStreamingJson(slot.partialJson);
 					}
+					// Only now, once no further delta can supply it: a tool call with an
+					// empty id is answered with an empty tool_call_id, which is the same
+					// class of 400 as an unanswered one. Assigning earlier would block a
+					// real id arriving in a later delta.
+					if (!block.id) block.id = randomUUID();
 					stream.push({
 						type: "toolcall_end",
 						contentIndex: slot.contentIndex,

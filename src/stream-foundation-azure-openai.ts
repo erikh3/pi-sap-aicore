@@ -8,6 +8,7 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
+	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { AzureOpenAiChatCompletionParameters } from "@sap-ai-sdk/foundation-models";
@@ -24,6 +25,7 @@ import {
 	resolveResourceGroup,
 	type ToolCallSlot,
 } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToAzureOpenAi } from "./translate-foundation.ts";
 
@@ -94,7 +96,9 @@ export function streamSapFoundationAzureOpenAi(
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
 
-			const { messages, tools } = piContextToAzureOpenAi(context);
+			const { messages, tools } = piContextToAzureOpenAi(
+				normalizeContext(context, model, options),
+			);
 			const params = buildAzureOpenAiParams(model, options);
 
 			const { AzureOpenAiChatClient } = await importFoundation();
@@ -263,11 +267,10 @@ export function streamSapFoundationAzureOpenAi(
 							const fragment = td.function?.arguments ?? "";
 							if (fragment) {
 								slot.partialJson += fragment;
-								try {
-									block.arguments = JSON.parse(slot.partialJson);
-								} catch {
-									// Partial JSON — keep accumulating until valid
-								}
+								// See src/stream.ts: pi's tolerant parser keeps
+								// `arguments` in step with the stream instead of staying
+								// `{}` until the final fragment lands.
+								block.arguments = parseStreamingJson(slot.partialJson);
 								stream.push({
 									type: "toolcall_delta",
 									contentIndex: slot.contentIndex,
@@ -291,13 +294,13 @@ export function streamSapFoundationAzureOpenAi(
 			for (const slot of toolSlots.values()) {
 				const block = output.content[slot.contentIndex];
 				if (block?.type === "toolCall") {
+					// See src/stream.ts: recover a truncated argument object rather than
+					// executing the tool with `{}`, and give an id-less call an id before
+					// pi has to answer it.
 					if (slot.partialJson) {
-						try {
-							block.arguments = JSON.parse(slot.partialJson);
-						} catch {
-							// Leave arguments as last successfully-parsed value
-						}
+						block.arguments = parseStreamingJson(slot.partialJson);
 					}
+					if (!block.id) block.id = randomUUID();
 					stream.push({
 						type: "toolcall_end",
 						contentIndex: slot.contentIndex,
@@ -311,6 +314,11 @@ export function streamSapFoundationAzureOpenAi(
 					});
 				}
 			}
+
+			// See the matching note in src/stream.ts: an aborted turn must not be
+			// reported as `done`, or its unexecuted tool calls get replayed as
+			// unanswered tool_call_ids on every later request.
+			if (options?.signal?.aborted) throw new Error("Request was aborted");
 
 			const usage = response.getTokenUsage();
 			if (usage) {

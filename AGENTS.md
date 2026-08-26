@@ -40,6 +40,26 @@ Credential storage access belongs in `src/auth.ts`, not stream transports. Provi
 refresh mutates the shared controller's view; never re-register providers to publish
 new models.
 
+## Message translation
+
+Pi hands `provider.stream()` the **raw** conversation log — it does not normalise it
+first. Every stream entry point must therefore pass the context through
+`normalizeContext()` (`src/normalize-context.ts`) before translating, exactly as pi's
+own API adapters call `transformMessages()`. Skipping it replays errored/aborted turns
+and orphaned tool calls, which wedges a session with
+`"tool_call_ids did not have response messages"` on every later request.
+
+`normalizeContext()` also encodes `options.toolChoice` (pi 0.84.3+): `"none"` —
+which pi sets on summarization/compaction turns — sends no tools at all, because
+that is the only expression of "none" every backend here accepts. Do not
+translate it into a per-backend `tool_choice` field.
+
+The four translators must each keep an assistant `tool_calls` message immediately
+followed by one tool/tool_result entry per id. Image tool results get hoisted into a
+synthetic user message, so hoisted content goes **after** the whole tool block, never
+between two of its entries. `src/translate.ts` and `src/translate-foundation.ts` share
+these rules — fix both together.
+
 ## Validation
 
 Pi loads `index.ts` directly. Validate changes with:
@@ -52,5 +72,6 @@ Pi loads `index.ts` directly. Validate changes with:
 
 ## Notes
 
-- Minimum supported versions are Pi 0.81.0 and Node.js 22.19.0.
+- Minimum supported versions are Pi 0.81.0 and Node.js 22.19.0; the dev/CI
+  baseline tracks the latest Pi (currently 0.84.3).
 - SAP reasoning maps to `output_config.effort` (low / medium / high).

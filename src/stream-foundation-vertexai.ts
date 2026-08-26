@@ -20,6 +20,7 @@ import {
 	mapUsage,
 	resolveResourceGroup,
 } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToVertexGenerateContent } from "./translate-foundation-vertexai.ts";
 
@@ -81,7 +82,9 @@ export function streamSapFoundationVertexAi(
 				resourceGroup,
 			});
 
-			const translated = piContextToVertexGenerateContent(context);
+			const translated = piContextToVertexGenerateContent(
+				normalizeContext(context, model, options),
+			);
 			const maxOutputTokens = options?.maxTokens ?? model.maxTokens;
 			const request = {
 				...translated,
