@@ -4,7 +4,7 @@ import type {
 	Model,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
+import { transformMessages } from "./transform-messages.ts";
 
 // Pi hands `provider.stream()` the *raw* conversation log. Every built-in pi
 // API adapter (openai-completions, anthropic-messages, bedrock-converse,
@@ -28,6 +28,12 @@ import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages"
 // It also downgrades images for text-only models and normalises thinking blocks
 // across a mid-conversation model switch, both of which the translators below
 // otherwise get wrong.
+//
+// `./transform-messages.ts` is a vendored copy: pi's extension loader maps only
+// a fixed set of pi-ai entrypoints, the real module is not among them, and
+// `transformMessages` is re-exported from none of the ones that are. Unmapped
+// specifiers resolve on an npm-layout pi and fail on a bundled one, so the map
+// is the contract. See that file's header.
 //
 // Tool-call-id normalisation is intentionally not passed: SAP's OpenAI-style ids
 // are already within Anthropic's `^[a-zA-Z0-9_-]{1,64}` constraint, and every

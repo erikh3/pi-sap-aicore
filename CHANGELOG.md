@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-27
+
+### Fixed
+
+- Excluded `scripts/debug-*.ts` from the published tarball. Local debugging
+  scratch was being packed because `package.json` "files" whitelists `scripts`
+  wholesale and a `.gitignore` rule does not override that; an explicit
+  `"!scripts/debug-*.ts"` entry does. 13 stray files, now 0.
+- Fixed the extension failing to load at pi startup with `Cannot find module
+  '@earendil-works/pi-ai/api/transform-messages'`. 0.4.3 imported pi's shared
+  `transformMessages()` helper straight from its module path. pi's extension
+  loader maps only four pi-ai specifiers for extensions — `@earendil-works/pi-ai`
+  (which resolves to the *compat* entrypoint) plus `/compat`, `/oauth` and
+  `/providers/all` — and anything outside that map behaves differently per build:
+  an npm-layout pi still has its dependencies on disk and resolves it by falling
+  through to Node, a bundled pi has nothing to fall through to and fails. The
+  helper is internal and re-exported from neither mapped root, so it is now
+  vendored as `src/transform-messages.ts`, byte-for-byte equivalent to pi-ai
+  0.81.1 through 0.84.3. The 0.4.3 tool-call pairing fix is unchanged in
+  behaviour.
+
+### Added
+
+- `npm run test:startup` (also in `prepublishOnly`): boots the real pi with the
+  full installed extension set — no `-e`, no `-ne` — against the working tree,
+  which is temporarily swapped in as the live `npm:pi-sap-aicore` via
+  `scripts/dev-link.mjs`. It probes with `pi -p` against a bogus provider, so pi
+  loads every extension and stops before reaching a model: no network, no tokens,
+  ~2s, and extension load failures surface verbatim. `--list-models` alone cannot
+  do this — it swallows load errors and the provider just never registers — so
+  both are asserted.
+- `test:compat` is now `scripts/test-compat.mjs` instead of an inline
+  `pi -e ./index.ts --list-models ...`. The inline form invoked bare `pi`, which
+  fails whenever the PATH shim cannot run (e.g. mise pointing at a node version
+  with no pi installed) — so the gate broke for environment reasons rather than
+  code ones. `scripts/resolve-pi.mjs` now finds a pi that actually executes, and
+  reports whether it is a bundled or npm build.
+- `npm run link:dev` / `unlink:dev` / `status:dev` for the same swap by hand, to
+  run an interactive `pi` against the working tree. The published copy is renamed
+  aside, never deleted, and `link` refuses to run over an existing backup.
+- `scripts/test-transform-messages.mjs`, run first in `npm test`. It fails any
+  value import of a pi specifier outside the loader's map — the class of bug
+  above, which nothing else caught, because every other gate (`tsc --noEmit`,
+  all of `npm test`, and `test:compat`) runs the extension from this repo, where
+  pi-ai is a devDependency and therefore always resolves. The check is static on
+  purpose: booting pi only reproduces the failure on a bundled build. The script
+  also diffs the vendored `transformMessages()` against pi's real one over nine
+  fixtures wherever pi-ai is resolvable, so upstream drift surfaces in CI rather
+  than in a user's session.
+
 ## [0.4.3] - 2026-08-26
 
 ### Fixed

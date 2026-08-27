@@ -21,7 +21,8 @@
     "src",
     "scripts",
     "tsconfig.json",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "!scripts/debug-*.ts"
   ],
   "pi": {
     "extensions": [
@@ -31,10 +32,14 @@
   },
   "scripts": {
     "update-models": "node scripts/update-models.mjs",
-    "test": "node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
-    "test:compat": "pi -e ./index.ts --list-models sap-aicore && pi -e ./index.ts --list-models sap-aicore-foundation",
+    "test": "node scripts/test-transform-messages.mjs && node scripts/test-auth-storage.mjs && node scripts/test-native-providers.mjs && node scripts/test-model-refresh.mjs && node scripts/test-vertex-tool-schema.mjs && node scripts/test-bedrock-tool-results.mjs && node scripts/test-orchestration-tool-results.mjs && node scripts/test-empty-content-blocks.mjs",
+    "test:compat": "node scripts/test-compat.mjs",
     "validate:foundation": "node scripts/validate-foundation-executables.mjs",
-    "prepublishOnly": "tsc --noEmit && npm test && npm run test:compat"
+    "prepublishOnly": "tsc --noEmit && npm test && npm run test:compat && npm run test:startup",
+    "link:dev": "node scripts/dev-link.mjs link",
+    "unlink:dev": "node scripts/dev-link.mjs unlink",
+    "status:dev": "node scripts/dev-link.mjs status",
+    "test:startup": "node scripts/test-startup.mjs"
   },
   "dependencies": {
     "@sap-ai-sdk/ai-api": "^2.12.0",
