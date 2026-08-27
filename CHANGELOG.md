@@ -39,11 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   do this — it swallows load errors and the provider just never registers — so
   both are asserted.
 - `test:compat` is now `scripts/test-compat.mjs` instead of an inline
-  `pi -e ./index.ts --list-models ...`. The inline form invoked bare `pi`, which
-  fails whenever the PATH shim cannot run (e.g. mise pointing at a node version
-  with no pi installed) — so the gate broke for environment reasons rather than
-  code ones. `scripts/resolve-pi.mjs` now finds a pi that actually executes, and
-  reports whether it is a bundled or npm build.
+  `pi -e ./index.ts --list-models ...`, and it splits its assertions by what the
+  machine can support. The extension-loads check is credential-free and runs
+  everywhere, including the publish workflow; the model-listing check needs
+  working SAP credentials and is skipped where there are none. The inline form
+  checked only pi's exit code, and pi exits 0 while printing "No models
+  available", so on a runner it asserted nothing at all. It also invoked bare
+  `pi`, which fails whenever the PATH shim cannot run (e.g. mise pointing at a
+  node version with no pi installed); `scripts/resolve-pi.mjs` now finds a pi
+  that actually executes and reports whether it is a bundled or npm build.
+- `test:startup` skips instead of failing where there is no local pi install to
+  swap — a CI runner has no `~/.pi` at all. `test-compat.mjs` carries the
+  credential-free load assertion for those environments.
 - `npm run link:dev` / `unlink:dev` / `status:dev` for the same swap by hand, to
   run an interactive `pi` against the working tree. The published copy is renamed
   aside, never deleted, and `link` refuses to run over an existing backup.

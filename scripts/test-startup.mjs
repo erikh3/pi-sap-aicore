@@ -26,7 +26,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { link, status, unlink } from "./dev-link.mjs";
-import { requirePi } from "./resolve-pi.mjs";
+import { resolvePi } from "./resolve-pi.mjs";
 
 let failures = 0;
 function check(condition, message) {
@@ -34,7 +34,20 @@ function check(condition, message) {
 	if (!condition) failures++;
 }
 
-const pi = requirePi();
+// This gate needs a machine with pi actually installed as a user would have it:
+// an extension directory to swap, and a runnable pi. CI has neither — a runner
+// has no ~/.pi at all — so it skips rather than fails. `test-compat.mjs` carries
+// the credential-free load assertion that does run everywhere.
+const pi = resolvePi();
+const installState = status();
+if (!pi || installState === "missing") {
+	console.log(
+		`skipped: ${!pi ? "no runnable pi" : "no installed pi-sap-aicore to swap"}` +
+			" — this gate needs a local pi install (see test-compat.mjs for the" +
+			" assertion that runs everywhere)",
+	);
+	process.exit(0);
+}
 console.log(`pi ${pi.version} (${pi.bin})${pi.bundled ? " [bundled]" : ""}\n`);
 
 // A neutral cwd: no project-local .pi/settings.json, no AGENTS.md discovery
