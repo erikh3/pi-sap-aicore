@@ -13,6 +13,7 @@ import type {
 	UserChatMessageContent,
 	UserChatMessageContentItem,
 } from "@sap-ai-sdk/orchestration";
+import { normalizeToolCallId } from "./tool-call-id.ts";
 
 // Anthropic prompt caching via SAP orchestration is undocumented. SAP's
 // ChatMessage schemas are strictly typed (no Record<string,any> escape
@@ -187,7 +188,7 @@ function piAssistantToOrchestration(msg: AssistantMessage): AssistantChatMessage
 			text += block.text;
 		} else if (block.type === "toolCall") {
 			toolCalls.push({
-				id: block.id,
+				id: normalizeToolCallId(block.id),
 				type: "function",
 				function: {
 					name: block.name,
@@ -246,7 +247,7 @@ function piToolResultToOrchestrationParts(
 
 	const toolMessage: ChatMessage = {
 		role: "tool",
-		tool_call_id: msg.toolCallId,
+		tool_call_id: normalizeToolCallId(msg.toolCallId),
 		// Anthropic rejects empty tool_result content; fall back to a
 		// non-whitespace placeholder (pointing at the hoisted image when there
 		// is one) so the request validates.
@@ -266,7 +267,7 @@ function piToolResultToOrchestrationParts(
 function missingToolResultMessage(toolCallId: string): ChatMessage {
 	return {
 		role: "tool",
-		tool_call_id: toolCallId,
+		tool_call_id: normalizeToolCallId(toolCallId),
 		content: "[Tool result missing from local transcript.]",
 	};
 }

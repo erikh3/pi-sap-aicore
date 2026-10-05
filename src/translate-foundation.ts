@@ -13,6 +13,7 @@ import type {
 	AzureOpenAiChatCompletionRequestUserMessage,
 	AzureOpenAiChatCompletionTool,
 } from "@sap-ai-sdk/foundation-models";
+import { normalizeToolCallId } from "./tool-call-id.ts";
 
 // pi `Context` → Azure OpenAI chat request. This is the orchestration
 // `translate.ts` minus the Anthropic `cache_control` tagging — that is an
@@ -140,7 +141,7 @@ function piAssistantToAzureOpenAi(
 			text += block.text;
 		} else if (block.type === "toolCall") {
 			toolCalls.push({
-				id: block.id,
+				id: normalizeToolCallId(block.id),
 				type: "function",
 				function: {
 					name: block.name,
@@ -183,7 +184,7 @@ function piToolResultToAzureOpenAiParts(
 	return {
 		toolMessage: {
 			role: "tool",
-			tool_call_id: msg.toolCallId,
+			tool_call_id: normalizeToolCallId(msg.toolCallId),
 			content:
 				text ||
 				(imageMessages.length > 0
@@ -199,7 +200,7 @@ function missingToolResultMessage(
 ): AzureOpenAiChatCompletionRequestToolMessage {
 	return {
 		role: "tool",
-		tool_call_id: toolCallId,
+		tool_call_id: normalizeToolCallId(toolCallId),
 		content: "[Tool result missing from local transcript.]",
 	};
 }

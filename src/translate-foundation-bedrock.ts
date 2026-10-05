@@ -6,6 +6,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
+import { normalizeToolCallId } from "./tool-call-id.ts";
 
 export type BedrockConverseContentBlock =
 	| { text: string }
@@ -198,7 +199,7 @@ function piAssistantToBedrockConverse(
 		} else if (block.type === "toolCall") {
 			content.push({
 				toolUse: {
-					toolUseId: block.id,
+					toolUseId: normalizeToolCallId(block.id),
 					name: block.name,
 					input: block.arguments,
 				},
@@ -219,7 +220,7 @@ function piToolResultToBedrockContentParts(
 ): BedrockToolResultParts {
 	return {
 		toolResult: bedrockToolResultBlock(
-			msg.toolCallId,
+			normalizeToolCallId(msg.toolCallId),
 			// Non-whitespace fallback: Anthropic's text-block validation applies
 			// inside tool_result content too.
 			toolResultText(msg).trim() || "(empty result)",
@@ -233,7 +234,7 @@ function missingToolResultBlock(
 	toolUseId: string,
 ): BedrockConverseContentBlock {
 	return bedrockToolResultBlock(
-		toolUseId,
+		normalizeToolCallId(toolUseId),
 		`Tool result missing for ${toolUseId}.`,
 		true,
 	);

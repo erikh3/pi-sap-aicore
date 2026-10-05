@@ -21,6 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Switching an in-progress conversation from pi's `openai-responses` provider
+  (e.g. a hai-proxy GPT model) into a `sap-aicore` model no longer fails every
+  subsequent turn with `SAP 400 at LLM Module: Invalid
+  'messages[N].tool_calls[0].id': string too long ... maximum length 64`. pi's
+  `openai-responses` provider stores each tool call as a `call_<id>|fc_<item-id>`
+  composite (~83 chars, contains `|`), which the translators forwarded verbatim;
+  SAP's OpenAI-compatible endpoints enforce OpenAI's 64-char `tool_call` id cap,
+  and Bedrock Converse additionally requires `toolUseId` to match
+  `[a-zA-Z0-9_-]+`. A new `normalizeToolCallId` helper deterministically hashes
+  any over-length or unsafe-character id to a `<=64` safe-character id, applied
+  identically to the assistant `tool_call` id and its paired tool result so the
+  pairing SAP requires survives the rewrite. Short, safe ids (Anthropic
+  `toolu_...`, plain OpenAI `call_...`) pass through unchanged. The guard covers
+  the orchestration, Azure OpenAI foundation, and Bedrock Converse paths; it is
+  length/charset-driven, so it works for a switch from any provider into
+  `sap-aicore`, not just OpenAI-Responses sources. Added an offline regression
+  test (`test-tool-call-id-normalization.mjs`).
+
 - Reasoning/thinking now streams through on the orchestration (`sap-aicore`)
   route. SAP orchestration (`@sap-ai-sdk/orchestration` >= 2.x) emits reasoning
   as `reasoning_content: ReasoningBlock[]`, but the stream reader only accepted
