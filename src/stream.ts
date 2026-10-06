@@ -150,14 +150,23 @@ function extractServerDetail(data: unknown): string | undefined {
 function looksLikeSapGatewayJsonParseFailure(error: unknown): boolean {
 	if (!(error instanceof SyntaxError)) return false;
 	const msg = error.message ?? "";
-	// V8 shape: `Unexpected token 'X', "<snippet>"... is not valid JSON`
+	// V8 (Node) shape: `Unexpected token 'X', "<snippet>"... is not valid JSON`
 	// or `Unexpected non-whitespace character...` for some payloads.
-	return /is not valid JSON/.test(msg) || /Unexpected token/.test(msg);
+	// Bun shape: `JSON Parse error: Unexpected identifier "<word>"`
+	return (
+		/is not valid JSON/.test(msg) ||
+		/Unexpected token/.test(msg) ||
+		/^JSON Parse error:/.test(msg)
+	);
 }
 
 function sapGatewayHint(error: SyntaxError): string {
-	const snippetMatch = error.message.match(/"([^"]+)"\.\.\./);
-	const snippet = snippetMatch?.[1];
+	const msg = error.message;
+	// V8 (Node): `Unexpected token 'X', "<snippet>"... is not valid JSON`
+	const v8Match = msg.match(/"([^"]+)"\.\.\./);
+	// Bun: `JSON Parse error: Unexpected identifier "<word>"`
+	const bunMatch = msg.match(/Unexpected identifier "([^"]+)"/);
+	const snippet = v8Match?.[1] ?? bunMatch?.[1];
 	const body = snippet ? ` Body started with: "${snippet}...".` : "";
 	const looksLikeEnvoy = snippet !== undefined && /^upstream\b/i.test(snippet);
 	const diagnosis = looksLikeEnvoy
