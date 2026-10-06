@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The orchestration (`sap-aicore`) route now auto-retries transient server-side
+  stream failures a bounded number of times (2 retries, 3 attempts total, with
+  500ms/1000ms linear backoff). SAP's orchestration gateway intermittently
+  returns a retryable failure after templating succeeds: a mid-stream 400 whose
+  body says "Try your request again" (surfaced as `SAP 400 at LLM Module: The
+  system encountered an unexpected error during processing. Try your request
+  again.`, observed on newly-added models like `anthropic--claude-4.8-opus`), or
+  an Envoy/Istio `upstream connect error` when the backend is briefly
+  unreachable. These clear on a resend, so the turn previously died with a raw
+  error the user had to retry by hand. A new `isTransientServerError` classifier
+  matches exactly these retryable shapes; persistent 400s (bad params,
+  streaming-not-supported, oversized context) never match and still surface
+  immediately. Retries fire ONLY while no chunk has reached pi, so a mid-stream
+  failure that already emitted output surfaces instead of duplicating it. Added
+  an offline regression test (`test-transient-retry.mjs`). Raised the TypeScript
+  `lib` to `ES2024` for `Promise.withResolvers` (Node 22.19+, the project
+  minimum, provides it at runtime).
+
 ### Changed
 
 - Bumped the `@sap-ai-sdk/*` dependencies (`ai-api`, `core`,

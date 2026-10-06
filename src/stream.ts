@@ -274,6 +274,34 @@ function isStreamingUnsupportedError(error: unknown): boolean {
 	return /streaming is not supported/i.test(formatError(error));
 }
 
+// Transient server-side failures SAP itself flags as retryable: the
+// orchestration gateway emits a mid-stream 400/5xx whose body says "Try your
+// request again" (observed as "LLM Module: ... unexpected error during
+// processing" on newly-added models like opus-4.8), or Envoy/Istio returns an
+// "upstream connect error" when the backend is briefly unreachable. These
+// clear on a resend, so streamSapAiCore retries them a bounded number of
+// times, but ONLY before any chunk has reached pi, so a retry can never
+// duplicate already-streamed output. Persistent 400s (bad params, unsupported
+// model, oversized context) never match and surface immediately.
+const TRANSIENT_SERVER_ERROR =
+	/try your request again|unexpected error during processing|upstream connect error|service unavailable|temporarily unavailable|status code 50[0-9]|SAP 50[0-9]/i;
+
+export function isTransientServerError(error: unknown): boolean {
+	// The gateway's plain-text "upstream connect error" surfaces as a raw
+	// JSON.parse SyntaxError (see looksLikeSapGatewayJsonParseFailure); match
+	// it structurally since formatError's hint text may be truncated.
+	if (error instanceof Error && looksLikeSapGatewayJsonParseFailure(error)) {
+		return true;
+	}
+	return TRANSIENT_SERVER_ERROR.test(formatError(error));
+}
+
+// Bounded retry budget for isTransientServerError hits. 2 retries (3 attempts
+// total) covers the brief backend blips observed on opus-4.8 without stalling
+// the turn for minutes on a genuine outage. Backoff is linear: 500ms, 1000ms.
+const MAX_TRANSIENT_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 500;
+
 // CACHE / INPUT TOKEN ACCOUNTING. Two things are load-bearing here and both
 // were confirmed against live SAP responses (blocking path, anthropic--claude-
 // 4.6-sonnet, PI_SAP_AICORE_CACHE_CONTROL=1):
@@ -916,10 +944,16 @@ export function streamSapAiCore(
 			// cache detail fields. Trades away token streaming for correct billing.
 			const forceBlocking =
 				process.env.PI_SAP_AICORE_FORCE_BLOCKING === "1";
-			let response: Awaited<ReturnType<typeof client.stream>> | undefined;
-			if (!forceBlocking && !STREAMING_UNSUPPORTED.has(model.id)) {
+
+			// Open the streaming response, or return undefined to signal the
+			// blocking fallback (forced, or SAP's "streaming not supported" 400
+			// before any chunk). The return type is inferred from client.stream.
+			const openStream = async () => {
+				if (forceBlocking || STREAMING_UNSUPPORTED.has(model.id)) {
+					return undefined;
+				}
 				try {
-					response = await client.stream({ messages }, options?.signal, {
+					return await client.stream({ messages }, options?.signal, {
 						promptTemplating: { include_usage: true },
 					});
 				} catch (error) {
@@ -936,211 +970,244 @@ export function streamSapAiCore(
 						model: model.id,
 						reason: "orchestration-streaming-unsupported",
 					});
+					return undefined;
 				}
-			}
-
-			if (!response) {
-				finishTurn(await runBlocking());
-				return;
-			}
-
-			let textIndex = -1;
-			let thinkingIndex = -1;
-			let reasoningField: string | undefined;
-			let refusalText = "";
-			const toolSlots = new Map<number, ToolCallSlot>();
-			let finishReason: string | undefined;
-
-			const closeText = () => {
-				if (textIndex < 0) return;
-				const block = output.content[textIndex];
-				if (block?.type === "text") {
-					stream.push({
-						type: "text_end",
-						contentIndex: textIndex,
-						content: block.text,
-						partial: output,
-					});
-				}
-				textIndex = -1;
 			};
 
-			const closeThinking = () => {
-				if (thinkingIndex < 0) return;
-				const block = output.content[thinkingIndex];
-				if (block?.type === "thinking") {
-					stream.push({
-						type: "thinking_end",
-						contentIndex: thinkingIndex,
-						content: block.thinking,
-						partial: output,
-					});
-				}
-				thinkingIndex = -1;
-			};
+			// Bounded retry around the whole streaming attempt. isTransientServerError
+			// hits (SAP's "Try your request again" 400, gateway "upstream connect
+			// error") can fire either when opening the stream or mid-drain; both land
+			// in the loop's catch. We retry ONLY while output.content is still empty,
+			// so a mid-stream failure that already emitted chunks surfaces instead of
+			// duplicating output. runBlocking failures ride the same loop.
+			for (let attempt = 0; ; attempt++) {
+				try {
+					const response = await openStream();
 
-			for await (const chunk of response.stream) {
-				if (options?.signal?.aborted) break;
-
-				const choice = chunk.findChoiceByIndex(0);
-				const rawDelta = (choice?.delta ?? {}) as ExtendedDelta;
-
-				// Reasoning first — providers emit reasoning chunks before the
-				// visible text, and pi's UI expects a thinking block to precede
-				// the text block in output.content ordering.
-				const reasoning = selectReasoningDelta(
-					chunk.getDeltaReasoningContent(),
-					rawDelta,
-					reasoningField,
-				);
-				const reasoningText = reasoning?.text;
-				if (reasoning) reasoningField = reasoning.field;
-				if (reasoningText) {
-					if (thinkingIndex < 0) {
-						closeText();
-						output.content.push({ type: "thinking", thinking: "" });
-						thinkingIndex = output.content.length - 1;
-						stream.push({
-							type: "thinking_start",
-							contentIndex: thinkingIndex,
-							partial: output,
-						});
+					if (!response) {
+						finishTurn(await runBlocking());
+						return;
 					}
-					const block = output.content[thinkingIndex];
-					if (block?.type === "thinking") {
-						block.thinking += reasoningText;
-						stream.push({
-							type: "thinking_delta",
-							contentIndex: thinkingIndex,
-							delta: reasoningText,
-							partial: output,
-						});
-					}
-				}
 
-				const delta = chunk.getDeltaContent();
-				if (delta) {
-					if (textIndex < 0) {
-						closeThinking();
-						output.content.push({ type: "text", text: "" });
-						textIndex = output.content.length - 1;
-						stream.push({
-							type: "text_start",
-							contentIndex: textIndex,
-							partial: output,
-						});
-					}
-					const block = output.content[textIndex];
-					if (block?.type === "text") {
-						block.text += delta;
-						stream.push({
-							type: "text_delta",
-							contentIndex: textIndex,
-							delta,
-							partial: output,
-						});
-					}
-				}
+					let textIndex = -1;
+					let thinkingIndex = -1;
+					let reasoningField: string | undefined;
+					let refusalText = "";
+					const toolSlots = new Map<number, ToolCallSlot>();
+					let finishReason: string | undefined;
 
-				// Refusals from SAP's content filter or the underlying
-				// provider (OpenAI moderation, etc.). Accumulate
-				// across chunks; surface as the final error message so
-				// the user sees something instead of an empty turn.
-				if (
-					typeof rawDelta.refusal === "string" &&
-					rawDelta.refusal.length > 0
-				) {
-					refusalText += rawDelta.refusal;
-				}
-
-				const toolDeltas = chunk.getDeltaToolCalls();
-				if (toolDeltas && toolDeltas.length > 0) {
-					closeText();
-					closeThinking();
-
-					for (const td of toolDeltas) {
-						let slot = toolSlots.get(td.index);
-						if (!slot) {
-							output.content.push({
-								type: "toolCall",
-								id: td.id ?? "",
-								name: td.function?.name ?? "",
-								arguments: {},
-							});
-							slot = {
-								contentIndex: output.content.length - 1,
-								partialJson: "",
-							};
-							toolSlots.set(td.index, slot);
+					const closeText = () => {
+						if (textIndex < 0) return;
+						const block = output.content[textIndex];
+						if (block?.type === "text") {
 							stream.push({
-								type: "toolcall_start",
-								contentIndex: slot.contentIndex,
+								type: "text_end",
+								contentIndex: textIndex,
+								content: block.text,
 								partial: output,
 							});
 						}
+						textIndex = -1;
+					};
 
-						const block = output.content[slot.contentIndex];
-						if (block?.type === "toolCall") {
-							if (td.id && !block.id) block.id = td.id;
-							if (td.function?.name && !block.name)
-								block.name = td.function.name;
+					const closeThinking = () => {
+						if (thinkingIndex < 0) return;
+						const block = output.content[thinkingIndex];
+						if (block?.type === "thinking") {
+							stream.push({
+								type: "thinking_end",
+								contentIndex: thinkingIndex,
+								content: block.thinking,
+								partial: output,
+							});
+						}
+						thinkingIndex = -1;
+					};
 
-							const fragment = td.function?.arguments ?? "";
-							if (fragment) {
-								slot.partialJson += fragment;
-								try {
-									block.arguments = JSON.parse(slot.partialJson);
-								} catch {
-									// Partial JSON — keep accumulating until valid
-								}
+					for await (const chunk of response.stream) {
+						if (options?.signal?.aborted) break;
+
+						const choice = chunk.findChoiceByIndex(0);
+						const rawDelta = (choice?.delta ?? {}) as ExtendedDelta;
+
+						// Reasoning first: providers emit reasoning chunks before the
+						// visible text, and pi's UI expects a thinking block to precede
+						// the text block in output.content ordering.
+						const reasoning = selectReasoningDelta(
+							chunk.getDeltaReasoningContent(),
+							rawDelta,
+							reasoningField,
+						);
+						const reasoningText = reasoning?.text;
+						if (reasoning) reasoningField = reasoning.field;
+						if (reasoningText) {
+							if (thinkingIndex < 0) {
+								closeText();
+								output.content.push({ type: "thinking", thinking: "" });
+								thinkingIndex = output.content.length - 1;
 								stream.push({
-									type: "toolcall_delta",
-									contentIndex: slot.contentIndex,
-									delta: fragment,
+									type: "thinking_start",
+									contentIndex: thinkingIndex,
+									partial: output,
+								});
+							}
+							const block = output.content[thinkingIndex];
+							if (block?.type === "thinking") {
+								block.thinking += reasoningText;
+								stream.push({
+									type: "thinking_delta",
+									contentIndex: thinkingIndex,
+									delta: reasoningText,
 									partial: output,
 								});
 							}
 						}
+
+						const delta = chunk.getDeltaContent();
+						if (delta) {
+							if (textIndex < 0) {
+								closeThinking();
+								output.content.push({ type: "text", text: "" });
+								textIndex = output.content.length - 1;
+								stream.push({
+									type: "text_start",
+									contentIndex: textIndex,
+									partial: output,
+								});
+							}
+							const block = output.content[textIndex];
+							if (block?.type === "text") {
+								block.text += delta;
+								stream.push({
+									type: "text_delta",
+									contentIndex: textIndex,
+									delta,
+									partial: output,
+								});
+							}
+						}
+
+						// Refusals from SAP's content filter or the underlying
+						// provider (OpenAI moderation, etc.). Accumulate
+						// across chunks; surface as the final error message so
+						// the user sees something instead of an empty turn.
+						if (
+							typeof rawDelta.refusal === "string" &&
+							rawDelta.refusal.length > 0
+						) {
+							refusalText += rawDelta.refusal;
+						}
+
+						const toolDeltas = chunk.getDeltaToolCalls();
+						if (toolDeltas && toolDeltas.length > 0) {
+							closeText();
+							closeThinking();
+
+							for (const td of toolDeltas) {
+								let slot = toolSlots.get(td.index);
+								if (!slot) {
+									output.content.push({
+										type: "toolCall",
+										id: td.id ?? "",
+										name: td.function?.name ?? "",
+										arguments: {},
+									});
+									slot = {
+										contentIndex: output.content.length - 1,
+										partialJson: "",
+									};
+									toolSlots.set(td.index, slot);
+									stream.push({
+										type: "toolcall_start",
+										contentIndex: slot.contentIndex,
+										partial: output,
+									});
+								}
+
+								const block = output.content[slot.contentIndex];
+								if (block?.type === "toolCall") {
+									if (td.id && !block.id) block.id = td.id;
+									if (td.function?.name && !block.name)
+										block.name = td.function.name;
+
+									const fragment = td.function?.arguments ?? "";
+									if (fragment) {
+										slot.partialJson += fragment;
+										try {
+											block.arguments = JSON.parse(slot.partialJson);
+										} catch {
+											// Partial JSON, keep accumulating until valid
+										}
+										stream.push({
+											type: "toolcall_delta",
+											contentIndex: slot.contentIndex,
+											delta: fragment,
+											partial: output,
+										});
+									}
+								}
+							}
+						}
+
+						finishReason = latchFinishReason(finishReason, chunk.getFinishReason());
 					}
+
+					closeText();
+					closeThinking();
+
+					let truncatedToolCall = false;
+					for (const slot of toolSlots.values()) {
+						const block = output.content[slot.contentIndex];
+						if (block?.type !== "toolCall") continue;
+						// Incomplete arguments JSON means the stream was cut mid-call.
+						// Skip emitting toolcall_end so the harness never dispatches a
+						// call with stale/empty arguments; finishTurn raises the error.
+						if (toolArgsTruncated(slot.partialJson)) {
+							truncatedToolCall = true;
+							continue;
+						}
+						if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
+						stream.push({
+							type: "toolcall_end",
+							contentIndex: slot.contentIndex,
+							toolCall: {
+								type: "toolCall",
+								id: block.id,
+								name: block.name,
+								arguments: block.arguments,
+							},
+							partial: output,
+						});
+					}
+
+					finishTurn({
+						finishReason: finishReason ?? response.getFinishReason(),
+						refusalText,
+						usage: response.getTokenUsage(),
+						truncatedToolCall,
+					});
+					return;
+				} catch (error) {
+					if (
+						attempt >= MAX_TRANSIENT_RETRIES ||
+						output.content.length > 0 ||
+						options?.signal?.aborted ||
+						!isTransientServerError(error)
+					) {
+						throw error;
+					}
+					debugLog({
+						requestId,
+						kind: "stream-retry",
+						model: model.id,
+						attempt: attempt + 1,
+						error: formatError(error),
+					});
+					const { promise, resolve } = Promise.withResolvers<void>();
+					setTimeout(resolve, RETRY_BASE_DELAY_MS * (attempt + 1));
+					await promise;
 				}
-
-				finishReason = latchFinishReason(finishReason, chunk.getFinishReason());
 			}
-
-			closeText();
-			closeThinking();
-
-			let truncatedToolCall = false;
-			for (const slot of toolSlots.values()) {
-				const block = output.content[slot.contentIndex];
-				if (block?.type !== "toolCall") continue;
-				// Incomplete arguments JSON means the stream was cut mid-call.
-				// Skip emitting toolcall_end so the harness never dispatches a
-				// call with stale/empty arguments; finishTurn raises the error.
-				if (toolArgsTruncated(slot.partialJson)) {
-					truncatedToolCall = true;
-					continue;
-				}
-				if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
-				stream.push({
-					type: "toolcall_end",
-					contentIndex: slot.contentIndex,
-					toolCall: {
-						type: "toolCall",
-						id: block.id,
-						name: block.name,
-						arguments: block.arguments,
-					},
-					partial: output,
-				});
-			}
-
-			finishTurn({
-				finishReason: finishReason ?? response.getFinishReason(),
-				refusalText,
-				usage: response.getTokenUsage(),
-				truncatedToolCall,
-			});
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatError(error);
