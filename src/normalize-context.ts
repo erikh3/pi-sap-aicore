@@ -6,12 +6,12 @@ import type {
 } from "@earendil-works/pi-ai";
 import { transformMessages } from "./transform-messages.ts";
 
-// Pi hands `provider.stream()` the *raw* conversation log. Every built-in pi
-// API adapter (openai-completions, anthropic-messages, bedrock-converse,
-// google-shared, mistral-conversations) runs it through pi's shared
-// `transformMessages()` before translating; this extension previously did not,
-// so it replayed the log 1:1 and inherited two failure modes the helper exists
-// to prevent:
+// Pi 0.87+ hands `provider.stream()` a normalized transcript whose system
+// messages carry the current prompt and tool declarations. Older Pi versions
+// use the legacy `Context.systemPrompt` and `Context.tools` fields. Resolve the
+// transcript shape back into those fields before applying the history cleanup
+// shared by every built-in adapter. Skipping either step causes one of two
+// failure classes:
 //
 //  1. Errored/aborted assistant turns were replayed. A turn that dies mid-stream
 //     (SSE drop, user interrupt) is persisted by pi with the tool calls it had
@@ -43,11 +43,65 @@ export function normalizeContext(
 	model: Model<Api>,
 	options?: SimpleStreamOptions,
 ): Context {
+	const resolved = resolveTranscriptContext(context);
+	return {
+		...resolved,
+		messages: transformMessages(resolved.messages, model),
+		tools: resolveTools(resolved, options),
+	};
+}
+
+// These fields were introduced after this package's minimum Pi version. Keep a
+// local structural type so one build remains compatible with both old and new
+// pi-ai type declarations.
+type TranscriptSystemMessage = {
+	role: "system";
+	content?: string | Array<{ type?: string; text?: string }>;
+	sections?: Record<string, string | null>;
+	toolsAdded?: NonNullable<Context["tools"]>;
+	toolsRemoved?: Array<{ name: string }>;
+};
+
+function resolveTranscriptContext(context: Context): Context {
+	// SAFETY: Pi supplies message objects; older typings omit the system role.
+	const transcriptMessages = context.messages as unknown as Array<{
+		role?: string;
+	}>;
+	const systemMessages = transcriptMessages.filter(
+		(message): message is TranscriptSystemMessage => message.role === "system",
+	);
+	if (systemMessages.length === 0) return context;
+
+	const promptParts: string[] = [];
+	const sections = new Map<string, string>();
+	const tools = new Map<string, NonNullable<Context["tools"]>[number]>();
+	for (const message of systemMessages) {
+		const content = systemContentText(message.content);
+		if (content) promptParts.push(content);
+		for (const [name, value] of Object.entries(message.sections ?? {})) {
+			if (value === null) sections.delete(name);
+			else sections.set(name, value);
+		}
+		for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
+		for (const tool of message.toolsAdded ?? []) tools.set(tool.name, tool);
+	}
+
 	return {
 		...context,
-		messages: transformMessages(context.messages, model),
-		tools: resolveTools(context, options),
+		systemPrompt: [...promptParts, ...sections.values()].join("\n\n"),
+		tools: [...tools.values()],
+		messages: transcriptMessages.filter(
+			(message) => message.role !== "system",
+		) as Context["messages"],
 	};
+}
+
+function systemContentText(content: TranscriptSystemMessage["content"]): string {
+	if (typeof content === "string") return content;
+	return (content ?? [])
+		.filter((part) => part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("\n");
 }
 
 // pi 0.84.3 added `toolChoice` ("auto" | "none") to SimpleStreamOptions, and

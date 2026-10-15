@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored system prompts and tool declarations with Pi 0.87's normalized
+  transcript context. SAP AI Core requests previously received neither, causing
+  models to narrate shell commands instead of emitting executable tool calls.
+  Legacy Pi context fields remain supported.
+
 ## [0.4.4] - 2026-08-27
 
 ### Fixed
