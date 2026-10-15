@@ -9,7 +9,7 @@ and share one login, so you pick the route per model. See
 
 ## Prerequisites
 
-- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 0.84.3**
+- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**
 - Node.js **22.19.0 or newer**
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
@@ -203,9 +203,9 @@ The model list is composed of three sources, merged at startup:
    npm run update-models
    ```
 
-   This re-fetches the live catalog, applies our family-specific filters
-   (currently anthropic claude-4.x, gpt-5*, gemini-2.5*), and writes the
-   snapshot to disk. Commit the result.
+   This re-fetches every entry in models.dev's SAP AI Core catalog and writes
+   the snapshot to disk, without filtering model families or generations.
+   Commit the result.
 
 2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine public
    catalog cache. Pi 0.81 refreshes authenticated providers in the background
@@ -215,6 +215,11 @@ The model list is composed of three sources, merged at startup:
    ```text
    /sap-models update
    ```
+
+   Like the bundled snapshot, this imports every SAP AI Core catalog entry;
+   choose which models to use in `/model`, or hide unwanted entries with the
+   overlay's `exclude` list. Public catalog inclusion does not guarantee that
+   a model is available in your SAP tenant; use `/sap-models discover` to compare.
 
    This does not edit the installed npm package and is safe across extension
    updates. The existing Provider objects publish the refreshed model list

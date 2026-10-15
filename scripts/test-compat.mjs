@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Loads this extension explicitly (`pi -e ./index.ts`) and checks it registers.
+// Loads only this extension (`pi -ne -e ./index.ts`) and checks it registers.
+// Without -ne, the installed copy can override these same provider IDs and mask
+// a broken working tree. test-startup.mjs separately covers the full installed set.
 //
 // Two assertions, because they need different things to be true of the machine:
 //
@@ -47,7 +49,7 @@ const pi = requirePi();
 console.log(`pi ${pi.version} (${pi.bin})${pi.bundled ? " [bundled]" : ""}\n`);
 
 const run = (args) =>
-	spawnSync(pi.bin, ["-e", `${ROOT}/index.ts`, ...args, "--offline"], {
+	spawnSync(pi.bin, ["-ne", "-e", `${ROOT}/index.ts`, ...args, "--offline"], {
 		encoding: "utf8",
 		timeout: 180_000,
 	});
@@ -78,7 +80,9 @@ if (hasSapCredentials()) {
 	for (const provider of PROVIDERS) {
 		const result = run(["--list-models", provider]);
 		const output = `${result.stdout || ""}${result.stderr || ""}`;
-		const listed = output.split("\n").filter((l) => l.startsWith(provider)).length;
+		const listed = output.split("\n")
+			.filter((line) => line.trim().split(/\s+/)[0] === provider).length;
+		check(result.status === 0, `${provider}: listing exited ${result.status}`);
 		check(listed > 0, `${provider}: ${listed} model(s)`);
 		if (listed === 0) console.error(output.trim().split("\n").slice(0, 6).join("\n"));
 	}
@@ -90,4 +94,4 @@ if (failures > 0) {
 	console.error(`\n${failures} check(s) failed`);
 	process.exit(1);
 }
-console.log("\nExtension loads correctly under an explicit -e load");
+console.log("\nExtension loads correctly under an isolated -ne -e load");

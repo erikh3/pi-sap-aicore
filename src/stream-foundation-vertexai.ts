@@ -9,6 +9,7 @@ import {
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	type ToolCall,
 } from "@earendil-works/pi-ai";
 import { executeRequest } from "@sap-ai-sdk/core";
 
@@ -203,7 +204,7 @@ function replayVertexGenerateContentResponse(
 				name: normalizeVertexFunctionName(providerName),
 				arguments:
 					part.functionCall.args && typeof part.functionCall.args === "object"
-						? (part.functionCall.args as Record<string, unknown>)
+						? (part.functionCall.args as ToolCall["arguments"])
 						: {},
 				...(part.thoughtSignature
 					? { thoughtSignature: part.thoughtSignature }

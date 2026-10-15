@@ -13,6 +13,7 @@ import {
 	type Model,
 	parseStreamingJson,
 	type SimpleStreamOptions,
+	type ToolCall,
 	type Usage,
 } from "@earendil-works/pi-ai";
 import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
@@ -758,7 +759,7 @@ export function streamSapAiCore(
 					// truncated argument object should degrade to the fields the model
 					// did emit, not to `{}`.
 					const parsedArgs = tc.function.arguments
-						? parseStreamingJson(tc.function.arguments)
+						? parseStreamingJson<ToolCall["arguments"]>(tc.function.arguments)
 						: {};
 					output.content.push({
 						type: "toolCall",

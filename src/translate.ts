@@ -72,7 +72,7 @@ export function piContextToOrchestration(context: Context): {
 			// A standalone tool message is invalid for OpenAI-shaped backends.
 			// Keep the information available to the model as transcript text.
 			messages.push(...piToolResultToSyntheticUserMessages(msg));
-		} else {
+		} else if (msg.role === "user") {
 			messages.push(piUserToOrchestration(msg));
 		}
 
@@ -358,6 +358,7 @@ function piToolToOrchestration(tool: Tool): ChatCompletionTool {
 		function: {
 			name: tool.name,
 			description: tool.description,
+			// SAFETY: Pi and SAP both use JSON Schema objects; their TS types differ.
 			parameters: tool.parameters as unknown as Record<string, unknown>,
 		},
 	};

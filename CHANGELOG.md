@@ -7,12 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-15
+
+### Changed
+
+- Import every entry in models.dev's SAP AI Core catalog during runtime refreshes
+  (`/sap-models update`) and maintainer snapshot refreshes, instead of limiting imports to
+  Claude 4, GPT-5, and Gemini 2.5. Users choose models in `/model` or exclude
+  unwanted entries through their overlay; foundation-route opt-in is unchanged.
+- Refreshed the bundled snapshot from 16 to 55 model entries.
+- Updated the development baseline to Pi 1.2.0 while retaining support for
+  Pi 0.81.0 and newer. Adjusted tool argument types for Pi's JSON object contract.
+  This supersedes the intermediate Pi 0.84.4 lockfile update in #23.
+- Updated the locked SAP AI SDK packages to 2.16.0 (#25).
+
 ### Fixed
 
 - Restored system prompts and tool declarations with Pi 0.87's normalized
-  transcript context. SAP AI Core requests previously received neither, causing
-  models to narrate shell commands instead of emitting executable tool calls.
-  Legacy Pi context fields remain supported.
+  transcript context (#24). SAP AI Core requests previously received neither,
+  causing models to narrate shell commands instead of emitting executable tool
+  calls. Legacy Pi context fields remain supported.
+- Preserved newline boundaries between system prompt text blocks in #24's
+  transcript replay, with regression coverage before merging.
+- Isolated standalone compatibility probes with `-ne -e` so the installed
+  extension cannot override the working tree and hide failures. Model-count
+  checks now match exact provider IDs rather than double-counting foundation
+  models as orchestration models; full installed-extension startup remains tested.
+
+### Added
+
+- Offline regression tests for complete catalog imports in both refresh paths,
+  and prompt/tool transcript replay across all four SAP translators, including
+  compaction tool suppression and system updates during tool calls.
+- Offline regression tests now run in CI alongside the typecheck; CI action
+  revisions are pinned to immutable commits.
 
 ## [0.4.4] - 2026-08-27
 
@@ -435,7 +463,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.4...v0.5.0
+[0.4.4]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...v0.4.1

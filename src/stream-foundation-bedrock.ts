@@ -9,6 +9,7 @@ import {
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	type ToolCall,
 } from "@earendil-works/pi-ai";
 import { executeRequest } from "@sap-ai-sdk/core";
 
@@ -210,7 +211,7 @@ function replayBedrockConverseResponse(
 				name: block.toolUse.name ?? "",
 				arguments:
 					block.toolUse.input && typeof block.toolUse.input === "object"
-						? (block.toolUse.input as Record<string, unknown>)
+						? (block.toolUse.input as ToolCall["arguments"])
 						: {},
 			};
 			output.content.push(toolCall);

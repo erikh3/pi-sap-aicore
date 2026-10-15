@@ -2,12 +2,11 @@
 // Boots the real pi with every installed extension enabled — no -e, no -ne —
 // against the working tree, and fails if anything did not load.
 //
-// This is the gate the -e/-ne workflows cannot be: `pi -e ./index.ts` loads this
-// extension *instead of* the installed set, so it proves nothing about how the
-// working tree behaves next to the other twenty packages, and `-ne` proves less
-// still. Here the working tree is temporarily swapped in as the live
-// npm:pi-sap-aicore (see dev-link.mjs) and pi discovers it the way it does on a
-// normal launch.
+// The isolated -ne -e gate cannot prove interaction with installed extensions.
+// Using -e alone is ambiguous: the installed copy can override the working
+// tree's providers. Here the working tree is temporarily swapped in as the live
+// npm:pi-sap-aicore (see dev-link.mjs), with all other extensions still enabled,
+// and pi discovers it the way it does on a normal launch.
 //
 // What it catches: syntax and load-time errors, activation crashes, provider
 // registrations that collide with another extension, anything that only shows up
@@ -94,7 +93,7 @@ try {
 	for (const provider of ["sap-aicore", "sap-aicore-foundation"]) {
 		const listed = modelOutput
 			.split("\n")
-			.filter((line) => line.startsWith(provider)).length;
+			.filter((line) => line.trim().split(/\s+/)[0] === provider).length;
 		check(listed > 0, `${provider}: ${listed} model(s) registered`);
 	}
 	check(models.status === 0, `pi --list-models exited ${models.status}`);

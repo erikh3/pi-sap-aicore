@@ -104,7 +104,7 @@ export function piContextToAzureOpenAi(context: Context): {
 			continue;
 		}
 
-		messages.push(piUserToAzureOpenAi(msg));
+		if (msg.role === "user") messages.push(piUserToAzureOpenAi(msg));
 	}
 
 	const tools = (context.tools ?? []).map(piToolToAzureOpenAi);
@@ -251,6 +251,7 @@ function piToolToAzureOpenAi(tool: Tool): AzureOpenAiChatCompletionTool {
 		function: {
 			name: tool.name,
 			description: tool.description,
+			// SAFETY: Pi and SAP both use JSON Schema objects; their TS types differ.
 			parameters: tool.parameters as unknown as Record<string, unknown>,
 		},
 	};

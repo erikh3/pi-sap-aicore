@@ -22,7 +22,8 @@ The model catalog is a layered **snapshot / cache / overlay**:
 Pi refreshes across both providers. It intentionally keeps the extension's cache
 format instead of writing Pi's generic ModelsStore. Commands:
 `/sap-models update|discover|list|paths|help`. Maintainer snapshot refresh:
-`scripts/update-models.mjs`.
+`scripts/update-models.mjs`. Both refresh paths import every entry from models.dev's
+`sap-ai-core` catalog; model selection and overlay exclusions belong to the user.
 
 ## Providers registered
 
@@ -42,12 +43,14 @@ new models.
 
 ## Message translation
 
-Pi hands `provider.stream()` the **raw** conversation log — it does not normalise it
-first. Every stream entry point must therefore pass the context through
-`normalizeContext()` (`src/normalize-context.ts`) before translating, exactly as pi's
-own API adapters call `transformMessages()`. Skipping it replays errored/aborted turns
-and orphaned tool calls, which wedges a session with
-`"tool_call_ids did not have response messages"` on every later request.
+Every stream entry point passes context through `normalizeContext()`
+(`src/normalize-context.ts`) before translating. It accepts legacy contexts and
+Pi 0.87+ transcripts, replays system prompt/tool deltas with local structural types
+that also compile against older Pi versions, then removes system messages before
+repairing tool-call pairs. A system update between a tool call and its result
+must not create a synthetic result.
+Message repair drops errored/aborted turns and answers orphaned tool calls;
+skipping it can wedge sessions with `"tool_call_ids did not have response messages"`.
 
 `normalizeContext()` also encodes `options.toolChoice` (pi 0.84.3+): `"none"` —
 which pi sets on summarization/compaction turns — sends no tools at all, because
@@ -66,12 +69,16 @@ Pi loads `index.ts` directly. Validate changes with:
 
 - `npx tsc --noEmit`
 - `npm test`
-- `pi -e ./index.ts --list-models sap-aicore`
-- `pi -e ./index.ts --list-models sap-aicore-foundation`
+- `pi -ne -e ./index.ts --list-models sap-aicore --offline`
+- `pi -ne -e ./index.ts --list-models sap-aicore-foundation --offline`
+- `npm run test:startup` for the full installed-extension set
 - import smoke tests
+
+Use `-ne -e` for standalone probes: `-e` alone also loads the installed copy,
+which can override the working tree's providers and hide failures.
 
 ## Notes
 
 - Minimum supported versions are Pi 0.81.0 and Node.js 22.19.0; the dev/CI
-  baseline tracks the latest Pi (currently 0.84.3).
+  baseline is recorded in `package.json` and `package-lock.json`.
 - SAP reasoning maps to `output_config.effort` (low / medium / high).

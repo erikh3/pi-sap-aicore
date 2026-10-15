@@ -10,8 +10,9 @@ export default function (pi: ExtensionAPI) {
 	const providers = createSapProviders(catalogController);
 
 	// coding-agent ships a nested exact pi-ai dependency, so strict resolvers can
-	// see two nominally distinct Provider type identities. The runtime contract is
-	// the same 0.81 object; isolate the package-boundary cast here.
+	// see two nominally distinct Provider type identities.
+	// SAFETY: the native Provider shape is shared across supported Pi versions;
+	// isolate the package-boundary cast here.
 	const registerNativeProvider = pi.registerProvider.bind(pi) as unknown as (
 		provider: Provider,
 	) => void;

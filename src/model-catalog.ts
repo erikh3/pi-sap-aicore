@@ -297,14 +297,6 @@ export function adaptModelsDevModel(model: {
 	return adapted;
 }
 
-export function shouldIncludeModelsDevModel(id: string): boolean {
-	return (
-		id.startsWith("anthropic--claude-4") ||
-		id.startsWith("gpt-5") ||
-		id.startsWith("gemini-2.5")
-	);
-}
-
 export async function fetchModelsDevSapSnapshot(
 	signal?: AbortSignal,
 ): Promise<SapModelsSnapshot> {
@@ -321,7 +313,6 @@ export async function fetchModelsDevSapSnapshot(
 	};
 	const sapModels = all["sap-ai-core"]?.models ?? {};
 	const adapted = Object.values(sapModels)
-		.filter((m) => shouldIncludeModelsDevModel(m.id))
 		.map(adaptModelsDevModel)
 		.sort((a, b) => a.id.localeCompare(b.id));
 

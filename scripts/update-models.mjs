@@ -71,14 +71,6 @@ function adapt(model) {
 	return adapted;
 }
 
-function shouldInclude(id) {
-	return (
-		id.startsWith("anthropic--claude-4") ||
-		id.startsWith("gpt-5") ||
-		id.startsWith("gemini-2.5")
-	);
-}
-
 const res = await fetch(SOURCE);
 if (!res.ok) {
 	console.error(`Failed to fetch ${SOURCE}: ${res.status} ${res.statusText}`);
@@ -87,7 +79,6 @@ if (!res.ok) {
 const all = await res.json();
 const sapModels = all["sap-ai-core"]?.models ?? {};
 const adapted = Object.values(sapModels)
-	.filter((m) => shouldInclude(m.id))
 	.map(adapt)
 	.sort((a, b) => a.id.localeCompare(b.id));
 
