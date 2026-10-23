@@ -9,6 +9,7 @@ import {
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	type ToolCall,
 } from "@earendil-works/pi-ai";
 import { executeRequest } from "@sap-ai-sdk/core";
 
@@ -20,6 +21,7 @@ import {
 	mapUsage,
 	resolveResourceGroup,
 } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToVertexGenerateContent } from "./translate-foundation-vertexai.ts";
 
@@ -81,7 +83,9 @@ export function streamSapFoundationVertexAi(
 				resourceGroup,
 			});
 
-			const translated = piContextToVertexGenerateContent(context);
+			const translated = piContextToVertexGenerateContent(
+				normalizeContext(context, model, options),
+			);
 			const maxOutputTokens = options?.maxTokens ?? model.maxTokens;
 			const request = {
 				...translated,
@@ -200,7 +204,7 @@ function replayVertexGenerateContentResponse(
 				name: normalizeVertexFunctionName(providerName),
 				arguments:
 					part.functionCall.args && typeof part.functionCall.args === "object"
-						? (part.functionCall.args as Record<string, unknown>)
+						? (part.functionCall.args as ToolCall["arguments"])
 						: {},
 				...(part.thoughtSignature
 					? { thoughtSignature: part.thoughtSignature }

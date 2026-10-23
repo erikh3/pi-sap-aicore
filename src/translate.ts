@@ -1,8 +1,10 @@
 import type {
 	AssistantMessage,
 	Context,
+	Message,
 	TextContent,
 	Tool,
+	ToolCall,
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
@@ -52,85 +54,144 @@ export function piContextToOrchestration(context: Context): {
 	// once SAP behaviour is confirmed.
 	const lastUserIdx = lastIndexWhere(pi, (m) => m.role === "user");
 	for (let i = 0; i < pi.length; i++) {
+		const piIndex = i;
+		const before = messages.length;
 		const msg = pi[i];
 
 		if (msg.role === "assistant") {
 			const assistant = piAssistantToOrchestration(msg);
-			const toolCalls = assistant.tool_calls ?? [];
-			if (toolCalls.length === 0) {
-				messages.push(assistant);
-				continue;
-			}
-
 			messages.push(assistant);
-
-			// Anthropic (which SAP orchestration wraps for `anthropic--*` models)
-			// requires the user turn immediately after an assistant's tool_use
-			// blocks to begin with a tool_result for EVERY tool_call_id, with
-			// nothing interleaved. Pi stores each tool result as its own top-level
-			// message, and image-bearing results (e.g. `read` on a PNG) get
-			// hoisted into a synthetic user message. Translating results one at a
-			// time therefore produces tool, user(image), tool — and Anthropic
-			// rejects the trailing tool_use as unanswered:
-			// "tool_use ids were found without tool_result blocks immediately
-			// after". Batch all contiguous tool results first: emit every
-			// role:"tool" message, THEN any hoisted images, THEN orphans. Mirrors
-			// the foundation Bedrock/Azure translators.
-			const expectedIds = toolCalls.map((tc) => tc.id);
-			const expected = new Set(expectedIds);
-			const byId = new Map<string, OrchestrationToolResultParts>();
-			const orphaned: ChatMessage[] = [];
-
-			let j = i + 1;
-			while (j < pi.length) {
-				const toolResult = pi[j];
-				if (toolResult.role !== "toolResult") break;
-				if (
-					expected.has(toolResult.toolCallId) &&
-					!byId.has(toolResult.toolCallId)
-				) {
-					byId.set(
-						toolResult.toolCallId,
-						piToolResultToOrchestrationParts(toolResult),
-					);
-				} else {
-					orphaned.push(...piToolResultToSyntheticUserMessages(toolResult));
-				}
-				j++;
+			// Extract raw ids from the pi message for result-matching; the
+			// translated assistant already carries normalized ids for the
+			// outbound request. pushToolResultBlock matches results by raw id
+			// and normalizes only when emitting the tool_call_id field.
+			const rawToolCallIds = msg.content
+				.filter((b): b is ToolCall => b.type === "toolCall")
+				.map((b) => b.id);
+			if (rawToolCallIds.length > 0) {
+				i = pushToolResultBlock(messages, pi, i, rawToolCallIds);
 			}
-
-			const imageMessages: ChatMessage[] = [];
-			for (const id of expectedIds) {
-				const parts = byId.get(id);
-				if (parts) {
-					messages.push(parts.toolMessage);
-					imageMessages.push(...parts.imageMessages);
-				} else {
-					messages.push(missingToolResultMessage(id));
-				}
-			}
-			messages.push(...imageMessages, ...orphaned);
-			i = j - 1;
-			continue;
-		}
-
-		if (msg.role === "toolResult") {
-			// A standalone tool result with no preceding assistant tool_use is an
-			// invalid bare role:"tool" message for Anthropic. Keep the information
-			// available to the model as user-visible transcript text.
+		} else if (msg.role === "toolResult") {
+			// A standalone tool message is invalid for OpenAI-shaped backends.
+			// Keep the information available to the model as transcript text.
 			messages.push(...piToolResultToSyntheticUserMessages(msg));
-			continue;
+		} else if (msg.role === "user") {
+			messages.push(piUserToOrchestration(msg));
 		}
 
-		// user
-		const user = piUserToOrchestration(msg);
-		const tagLast = CACHE_CONTROL_ENABLED && i === lastUserIdx;
-		messages.push(tagLast ? tagCacheControl(user, true) : user);
+		const tagLast = CACHE_CONTROL_ENABLED && piIndex === lastUserIdx;
+		if (tagLast && messages.length > before) {
+			messages[messages.length - 1] = tagCacheControl(
+				messages[messages.length - 1],
+				true,
+			);
+		}
 	}
 
 	const tools = (context.tools ?? []).map(piToolToOrchestration);
 
+	assertToolMessagePairing(messages);
 	return { messages, tools };
+}
+
+type ToolPairingView = {
+	role: string;
+	tool_calls?: { id: string }[];
+	tool_call_id?: string;
+};
+
+// Last line of defence for the rule that wedges whole sessions when it is
+// broken: every assistant `tool_calls` id must be answered by a role:"tool"
+// message before the next message of any other role. The batching above and
+// normalizeContext() upstream both uphold it, so reaching a violation here
+// means a case neither anticipated — and the request is then guaranteed to
+// fail at SAP with an opaque 400 naming ids the user cannot act on. Fail here
+// instead, locally, naming the ids and where the pairing broke, and spend no
+// round trip on a request that cannot succeed.
+export function assertToolMessagePairing(
+	messages: readonly ToolPairingView[],
+): void {
+	for (let i = 0; i < messages.length; i++) {
+		const msg = messages[i];
+		if (msg.role !== "assistant" || !msg.tool_calls?.length) continue;
+
+		const answered = new Set<string>();
+		let j = i + 1;
+		for (; j < messages.length && messages[j].role === "tool"; j++) {
+			const id = messages[j].tool_call_id;
+			if (id) answered.add(id);
+		}
+
+		const unanswered = msg.tool_calls
+			.map((toolCall) => toolCall.id)
+			.filter((id) => !id || !answered.has(id));
+		if (unanswered.length === 0) continue;
+
+		const ids = unanswered.map((id) => id || "(empty id)").join(", ");
+		throw new Error(
+			`pi-sap-aicore built an invalid request: the assistant message at ` +
+				`index ${i} has tool_calls with no matching tool message before the ` +
+				`next ${messages[j]?.role ?? "end of conversation"}. Unanswered ` +
+				`tool_call_ids: ${ids}. This is a bug in the extension's message ` +
+				`translation, not in your conversation — please report it with this ` +
+				`message. Set PI_SAP_AICORE_DEBUG_PAYLOAD=<file> and retry to capture ` +
+				`the full request alongside it.`,
+		);
+	}
+}
+
+// SAP orchestration fronts OpenAI-shaped backends, which require every
+// assistant `tool_calls` entry to be answered by a role:"tool" message for
+// *all* of its ids, immediately after the assistant message. Pi stores each
+// tool result as a separate top-level message and tool results may carry
+// images, which this translator has to hoist into synthetic user messages
+// (SAP's ToolChatMessage.content schema is text-only). Translating results
+// one-by-one therefore produces `tool, user(image), tool` — and the backend
+// rejects the second call as unanswered:
+//   "An assistant message with 'tool_calls' must be followed by tool messages
+//    responding to each 'tool_call_id'."
+// Batch every contiguous tool result first, emit the required tool messages in
+// tool_call order, then append hoisted images and any leftovers. Returns the
+// index of the last pi message consumed.
+function pushToolResultBlock(
+	messages: ChatMessage[],
+	pi: Message[],
+	assistantIndex: number,
+	expectedIds: string[],
+): number {
+	const expected = new Set(expectedIds);
+	const byId = new Map<string, OrchestrationToolResultParts>();
+	const orphaned: ChatMessage[] = [];
+
+	let j = assistantIndex + 1;
+	while (j < pi.length) {
+		const toolResult = pi[j];
+		if (toolResult.role !== "toolResult") break;
+		if (expected.has(toolResult.toolCallId) && !byId.has(toolResult.toolCallId)) {
+			byId.set(toolResult.toolCallId, piToolResultToOrchestrationParts(toolResult));
+		} else {
+			orphaned.push(...piToolResultToSyntheticUserMessages(toolResult));
+		}
+		j++;
+	}
+
+	const imageMessages: ChatMessage[] = [];
+	for (const id of expectedIds) {
+		const translated = byId.get(id);
+		if (translated) {
+			messages.push(translated.toolMessage);
+			imageMessages.push(...translated.imageMessages);
+		} else {
+			// The tool call was never answered locally — pi's transformMessages()
+			// normally synthesises a result first (see src/normalize-context.ts),
+			// so reaching here means a caller bypassed it. Answer it anyway: a
+			// missing id fails the whole request, and every later request in the
+			// conversation with it.
+			messages.push(missingToolResultMessage(id));
+		}
+	}
+	messages.push(...imageMessages, ...orphaned);
+	return j - 1;
 }
 
 function lastIndexWhere<T>(arr: T[], pred: (t: T) => boolean): number {
@@ -179,7 +240,9 @@ function piUserToOrchestration(msg: UserMessage): ChatMessage {
 	return { role: "user", content: items as UserChatMessageContent };
 }
 
-function piAssistantToOrchestration(msg: AssistantMessage): AssistantChatMessage {
+function piAssistantToOrchestration(
+	msg: AssistantMessage,
+): AssistantChatMessage {
 	let text = "";
 	const toolCalls: NonNullable<AssistantChatMessage["tool_calls"]> = [];
 
@@ -225,15 +288,14 @@ type OrchestrationToolResultParts = {
 	imageMessages: ChatMessage[];
 };
 
-// Translate one matched tool result into a role:"tool" message plus any image
-// blocks hoisted into synthetic user messages. SAP's ToolChatMessage.content
-// schema is text-only (`string | TextContent[]`), so image blocks produced by
-// pi tools (most commonly `read` on an image file) can't ride along on the
-// tool message; they follow as user messages. The caller batches these so all
-// tool messages precede all images — see piContextToOrchestration.
 function piToolResultToOrchestrationParts(
 	msg: ToolResultMessage,
 ): OrchestrationToolResultParts {
+	// SAP's ToolChatMessage.content schema is text-only (`string |
+	// TextContent[]`), so any image blocks produced by pi tools (most
+	// commonly the `read` tool on an image file) would be silently dropped.
+	// Hoist them into synthetic user messages placed after the required
+	// tool-message block so vision-capable models actually see the bytes.
 	const text = toolResultText(msg);
 	const imageMessages: ChatMessage[] = toolResultImages(msg).map((img) => ({
 		role: "user",
@@ -315,6 +377,7 @@ function piToolToOrchestration(tool: Tool): ChatCompletionTool {
 		function: {
 			name: tool.name,
 			description: tool.description,
+			// SAFETY: Pi and SAP both use JSON Schema objects; their TS types differ.
 			parameters: tool.parameters as unknown as Record<string, unknown>,
 		},
 	};

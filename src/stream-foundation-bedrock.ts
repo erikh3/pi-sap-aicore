@@ -9,6 +9,7 @@ import {
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
+	type ToolCall,
 } from "@earendil-works/pi-ai";
 import { executeRequest } from "@sap-ai-sdk/core";
 
@@ -20,6 +21,7 @@ import {
 	mapUsage,
 	resolveResourceGroup,
 } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason } from "./translate.ts";
 import { piContextToBedrockConverse } from "./translate-foundation-bedrock.ts";
 
@@ -88,7 +90,9 @@ export function streamSapFoundationBedrock(
 				resourceGroup,
 			});
 
-			const translated = piContextToBedrockConverse(context);
+			const translated = piContextToBedrockConverse(
+				normalizeContext(context, model, options),
+			);
 			const maxTokens = options?.maxTokens ?? model.maxTokens;
 			const request = {
 				...translated,
@@ -207,7 +211,7 @@ function replayBedrockConverseResponse(
 				name: block.toolUse.name ?? "",
 				arguments:
 					block.toolUse.input && typeof block.toolUse.input === "object"
-						? (block.toolUse.input as Record<string, unknown>)
+						? (block.toolUse.input as ToolCall["arguments"])
 						: {},
 			};
 			output.content.push(toolCall);

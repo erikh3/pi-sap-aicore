@@ -207,29 +207,24 @@ export type LoadedSapModelCatalog = {
 	};
 };
 
-function snapshotTimestamp(snapshot: SapModelsSnapshot | undefined): number | undefined {
-	if (!snapshot?.fetchedAt) return undefined;
-	const timestamp = Date.parse(snapshot.fetchedAt);
-	return Number.isFinite(timestamp) ? timestamp : undefined;
-}
-
 /**
- * Persisted metadata may overlay the bundled snapshot only when it is non-empty
- * and not older. An empty `models` array is treated as "no usable cache": a
- * transient empty tenant response (outage, wrong resource group, over-broad
- * filter) writes `{count:0, models:[]}` with a fresh timestamp, and without this
- * guard `mergeSapModels`'s `cache ?? packaged` base would pick the empty array
- * (not nullish) and collapse the whole catalog to zero callable models.
+ * The live tenant cache is the authoritative set of callable models: it fully
+ * replaces the bundled snapshot rather than unioning with it. Any non-empty
+ * cache wins unconditionally — an older cache still reflects what the tenant
+ * actually exposes, while a newer bundled snapshot may include models the
+ * tenant does not offer. An empty `models` array is treated as "no usable
+ * cache": a transient empty tenant response (outage, wrong resource group,
+ * over-broad filter) writes `{count:0, models:[]}` with a fresh timestamp,
+ * and without this guard `mergeSapModels`'s `cache ?? packaged` base would
+ * pick the empty array (not nullish) and collapse the whole catalog to zero
+ * callable models.
  */
 export function shouldUseCachedSnapshot(
 	packaged: SapModelsSnapshot,
 	cache: SapModelsSnapshot | undefined,
 ): boolean {
-	if (!cache?.models?.length) return false;
-	const packagedAt = snapshotTimestamp(packaged);
-	const cacheAt = snapshotTimestamp(cache);
-	if (packagedAt === undefined || cacheAt === undefined) return true;
-	return cacheAt >= packagedAt;
+	void packaged;
+	return !!(cache?.models?.length);
 }
 
 export function loadModelCatalog(): LoadedSapModelCatalog {
@@ -369,18 +364,13 @@ export function adaptTenantModel(resource: TenantModelResource): SapModel {
 	return adapted;
 }
 
-// A tenant model reaches pi's orchestration catalog only when it is (1) in an
-// allowlisted family, (2) not an embedding model, (3) reachable through the
-// orchestration scenario, and (4) a text-generation chat model — which drops
-// image-generation and speech-only variants that share a family prefix.
+// Runtime catalog includes supported chat families exposed through orchestration.
+// The complete models.dev catalog is only an offline bootstrap snapshot.
 export function shouldIncludeTenantModel(resource: TenantModelResource): boolean {
 	const id = resource.model;
 	if (id.includes("embed")) return false;
-	const inFamily =
-		id.startsWith("anthropic--claude-") ||
-		id.startsWith("gpt-") ||
-		id.startsWith("gemini-") ||
-		id.startsWith("qwen");
+	const inFamily = id.startsWith("anthropic--claude-") || id.startsWith("gpt-") ||
+		id.startsWith("gemini-") || id.startsWith("qwen");
 	if (!inFamily) return false;
 	const orchestrationCapable = (resource.allowedScenarios ?? []).some(
 		(scenario) => scenario.scenarioId === "orchestration",

@@ -11,6 +11,7 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
+	parseStreamingJson,
 	type SimpleStreamOptions,
 	type Usage,
 } from "@earendil-works/pi-ai";
@@ -18,6 +19,7 @@ import type { ChatModel, LlmModelParams } from "@sap-ai-sdk/orchestration";
 import type { TokenUsage } from "@sap-ai-sdk/orchestration/internal.js";
 
 import { parseAndValidateServiceKey, type ValidatedKey } from "./auth.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import { mapFinishReason, piContextToOrchestration } from "./translate.ts";
 
 // `@sap-ai-sdk/orchestration` is loaded dynamically (not at module load) so a
@@ -750,7 +752,7 @@ export function streamSapAiCore(
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
 
-			const { messages, tools } = piContextToOrchestration(context);
+			const { messages, tools } = piContextToOrchestration(normalizeContext(context, model, options));
 
 			const { OrchestrationClient } = await importOrchestration();
 			const llmParams = buildLlmParams(model, options, tools.length > 0);
@@ -895,18 +897,19 @@ export function streamSapAiCore(
 				}
 
 				for (const tc of blocking.getToolCalls() ?? []) {
-					let parsedArgs: Record<string, unknown> = {};
-					if (tc.function.arguments) {
-						try {
-							parsedArgs = JSON.parse(tc.function.arguments);
-						} catch {
-							// Model emitted invalid JSON — leave args empty rather
-							// than crash; mirrors the streaming path's tolerance.
-						}
+					if (toolArgsTruncated(tc.function.arguments)) {
+						return {
+							finishReason: blocking.getFinishReason(),
+							refusalText: "",
+							usage: blocking.getTokenUsage(),
+							truncatedToolCall: true,
+						};
 					}
+					const parsedArgs = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+					const id = tc.id || randomUUID();
 					output.content.push({
 						type: "toolCall",
-						id: tc.id,
+						id,
 						name: tc.function.name,
 						arguments: parsedArgs,
 					});
@@ -929,7 +932,7 @@ export function streamSapAiCore(
 						contentIndex: idx,
 						toolCall: {
 							type: "toolCall",
-							id: tc.id,
+							id,
 							name: tc.function.name,
 							arguments: parsedArgs,
 						},
@@ -1149,11 +1152,7 @@ export function streamSapAiCore(
 									const fragment = td.function?.arguments ?? "";
 									if (fragment) {
 										slot.partialJson += fragment;
-										try {
-											block.arguments = JSON.parse(slot.partialJson);
-										} catch {
-											// Partial JSON, keep accumulating until valid
-										}
+										block.arguments = parseStreamingJson(slot.partialJson);
 										stream.push({
 											type: "toolcall_delta",
 											contentIndex: slot.contentIndex,
@@ -1167,6 +1166,7 @@ export function streamSapAiCore(
 
 						finishReason = latchFinishReason(finishReason, chunk.getFinishReason());
 					}
+					if (options?.signal?.aborted) throw new Error("Request was aborted");
 
 					closeText();
 					closeThinking();
@@ -1183,6 +1183,7 @@ export function streamSapAiCore(
 							continue;
 						}
 						if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
+						if (!block.id) block.id = randomUUID();
 						stream.push({
 							type: "toolcall_end",
 							contentIndex: slot.contentIndex,

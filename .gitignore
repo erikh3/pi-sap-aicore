@@ -7,3 +7,9 @@ node_modules/
 .pi/
 .pi-lens/
 .pi-subagents/
+
+# Local build/debug scratch. Neither ships: dist/ is outside package.json
+# "files", and scripts/debug-*.ts is excluded there by an explicit "!" entry
+# (a .gitignore rule alone does not override the "files" whitelist).
+dist/
+scripts/debug-*.ts
