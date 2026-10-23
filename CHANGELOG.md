@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reasoning GPT foundation models now use SAP's OpenAI Responses client with
+  native summaries and preserved reasoning history. Existing Azure foundation
+  deployments are required; the provider makes no deployment changes.
+
 - The orchestration (`sap-aicore`) route now auto-retries transient server-side
   stream failures a bounded number of times (2 retries, 3 attempts total, with
   500ms/1000ms linear backoff). SAP's orchestration gateway intermittently
@@ -29,17 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Bumped the `@sap-ai-sdk/*` dependencies (`ai-api`, `core`,
-  `foundation-models`, `orchestration`) from 2.13.0 to 2.14.0. The release is an
-  additive minor (orchestration reasoning-content accessors, an `overrideConfig`
-  field on `OrchestrationConfigRef`, and a new Vertex AI embedding model) with no
-  breaking changes to the surfaces this extension uses. The orchestration
-  `ChatMessage` union gained a `DeveloperChatMessage` member, so
-  `piAssistantToOrchestration()` now declares its concrete `AssistantChatMessage`
-  return type instead of the wider union. Rebased the vendored `ai-api`
-  `deployment-cache.js` Cache-import patch onto 2.14.0.
+- Updated `@sap-ai-sdk/ai-api`, `core`, `foundation-models`, and `orchestration`
+  to 2.17.0. Added `@sap-ai-sdk/openai` 2.17.0 and its OpenAI 7 dependency.
+  Removed the obsolete connectivity Cache import patch and rebased the
+  orchestration length-finish diagnostic patch.
 
 ### Fixed
+
+- GPT-6 routes and GPT-5.3 Codex now request reasoning summaries with tools
+  attached instead of dropping reasoning for every GPT model. GPT-5.6 retains
+  the orchestration tool restriction. Blocking responses now emit returned
+  reasoning before the answer.
 
 - Switching an in-progress conversation from pi's `openai-responses` provider
   (e.g. a hai-proxy GPT model) into a `sap-aicore` model no longer fails every
