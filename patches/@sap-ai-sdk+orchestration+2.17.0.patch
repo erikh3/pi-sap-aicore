@@ -1,8 +1,7 @@
 diff --git a/node_modules/@sap-ai-sdk/orchestration/dist/util/stream.js b/node_modules/@sap-ai-sdk/orchestration/dist/util/stream.js
-index 7b02e7b..df3e630 100644
 --- a/node_modules/@sap-ai-sdk/orchestration/dist/util/stream.js
 +++ b/node_modules/@sap-ai-sdk/orchestration/dist/util/stream.js
-@@ -163,7 +163,7 @@ function handleFinishReason(existing, incoming, choiceIndex) {
+@@ -165,7 +165,7 @@ function handleFinishReason(existing, incoming, choiceIndex) {
              logger.error(`Choice ${choiceIndex}: Stream finished with content filter hit.`);
              break;
          case 'length':

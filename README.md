@@ -145,9 +145,9 @@ The extension registers **two providers**, both backed by the same service key:
 | Models | Claude, GPT-5*, Gemini | GPT/OpenAI (`azure-openai`), Anthropic/Claude (`aws-bedrock`), and Gemini (`gcp-vertexai`) |
 | Tool use | yes | yes — tools are translated to OpenAI, Bedrock Converse, or Vertex/Gemini function declarations by executable |
 | Streaming | subject to orchestration's per-model allow-list — new models can 400 `Streaming is not supported` (we fall back to non-streaming) | Azure OpenAI streams natively; AWS Bedrock and Vertex AI currently use non-streaming endpoints and replay responses into pi stream events |
-| Reasoning effort | tunable (`reasoning_effort` / `thinking`) | model **default** only for Azure; Bedrock/Anthropic and Vertex/Gemini effort controls are intentionally conservative |
+| Reasoning effort | tunable on supported routes; GPT-6 and GPT-5.3 Codex request native summaries with tools | GPT reasoning models use Responses with explicit effort and summaries; Bedrock/Anthropic and Vertex/Gemini controls remain conservative |
 | Content filter / grounding / templating | yes | no — raw model access |
-| SDK / endpoint | `@sap-ai-sdk/orchestration` | `AzureOpenAiChatClient` for `azure-openai`; SAP `/inference/deployments/{id}/converse` for `aws-bedrock`; SAP `/inference/deployments/{id}/models/{model}:generateContent` for `gcp-vertexai` |
+| SDK / endpoint | `@sap-ai-sdk/orchestration` | `SapOpenAi.responses` for reasoning GPT models; `AzureOpenAiChatClient` for other Azure models; SAP `/converse` for Bedrock and `generateContent` for Vertex |
 
 Both routes appear in the model list simultaneously, so you choose per model. The
 foundation route exists mainly to access new models directly when orchestration
@@ -363,33 +363,31 @@ keybind `Shift+Tab`): `off`, `minimal`, `low`, `medium`, `high`, `xhigh`.
   the adaptive shape on these models ("adaptive thinking is not
   supported on this model"), which is why we split.
 
-**Note on reasoning visibility:** SAP orchestration does NOT pass
-structured reasoning/thinking content through to streaming clients.
-The model genuinely reasons (you'll see step-by-step structure leak
-into the visible answer text, and the tokens are billed via
-`completion_tokens_details.reasoning_tokens`), but pi's dedicated
-"thinking" panel will stay empty for SAP-routed models — there's no
-client-side fix. If SAP exposes a server-side flag for this in the
-future, our `pickReasoning` probe is wired and ready in `stream.ts`.
+**Reasoning visibility:** the provider renders the native reasoning text SAP returns
+in both streaming and blocking responses. GPT-6 routes and GPT-5.3 Codex request
+`reasoning: { effort, summary: "auto" }`, including when tools are available.
+Summary emission depends on the model and gateway; reasoning token usage does not
+guarantee a visible summary on every turn.
 
-- **OpenAI models** (`gpt-*`) use `reasoning_effort: "minimal" | "low"
-  | "medium" | "high"`. `xhigh` is omitted — OpenAI has no equivalent
-  tier; pi will skip it when cycling.
+Older GPT orchestration routes use `reasoning_effort` on text-only requests. They
+omit it when tools are attached because some routes, including GPT-5.6 Luna, Sol,
+and Terra, reject that combination. Those models may return an answer without a
+thinking block. A prompt saying "do not use tools" does not remove attached tools.
 - **Gemini models** (`gemini-2.5-*`) ship with `reasoning: false` —
   SAP's gemini reasoning passthrough is undocumented, so we keep
   `Shift+Tab` off the cycle for these models rather than send a request
   shape SAP may reject. Wire-up (likely `thinking_config.thinking_budget`)
   is a future TODO in `src/stream.ts:reasoningParams`.
 
-**Foundation route caveat:** on `sap-aicore-foundation/*`, GPT/OpenAI models use
-the direct Azure OpenAI SDK pinned to API version `2024-10-21`, which has no
-`reasoning_effort` field — so gpt-5\* reason at their **default** effort and pi's
-thinking-level cycle is a no-op there. Anthropic/Claude models use SAP's AWS
-Bedrock `/converse` endpoint; Gemini models use SAP's Vertex AI `generateContent`
-endpoint with `thinkingBudget: 0` by default so small pi output budgets produce
-visible text instead of only hidden thoughts. Tool/function calling is supported
-on all three direct foundation executables. Use the orchestration route if you
-need explicit effort control.
+**Foundation route:** reasoning GPT models use the SAP OpenAI Responses client,
+request native summaries, and preserve reasoning items for subsequent tool turns.
+This requires an existing Azure OpenAI foundation deployment for the selected
+model. The extension never creates deployments or changes remote configuration.
+Non-reasoning Azure models continue to use Chat Completions.
+
+Anthropic/Claude models use SAP's Bedrock `/converse` endpoint; Gemini uses Vertex
+`generateContent` with `thinkingBudget: 0` by default. Tool calling remains
+supported on all three foundation executables.
 
 To override budgets per model, edit `thinkingLevelMap` on the relevant entry in
 `~/.pi/agent/pi-sap-aicore/models.json`.

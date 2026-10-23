@@ -424,6 +424,13 @@ function clampBudget(intended: number, maxTokens: number): number {
 	return Math.min(intended, ceiling);
 }
 
+const GPT_SUMMARY_MODELS: Record<string, true> = {
+	"gpt-5.3-codex": true,
+	"gpt-6-astra": true,
+	"gpt-6-luna": true,
+	"gpt-6.1-sol": true,
+};
+
 function reasoningParams(
 	model: Model<Api>,
 	reasoning: string | undefined,
@@ -468,27 +475,18 @@ function reasoningParams(
 		};
 	}
 	if (model.id.startsWith("gpt-")) {
-		// SAP orchestration's chat/completions endpoint does NOT accept
-		// `reasoning_effort` alongside function tools for gpt-5.x. Confirmed
-		// against SAP's Supported Parameters list (which omits reasoning_effort
-		// entirely) and the runtime 400 from gpt-5.5:
-		//   "Function tools with reasoning_effort are not supported for
-		//    gpt-5.5-...-dz-std in /v1/chat/completions. Please use /v1/responses
-		//    instead."
-		// The Responses API (/v1/responses) is a foundation-models deployment
-		// endpoint, unreachable through the orchestration SDK, so we can't switch
-		// endpoints here. Drop reasoning_effort on tool turns so the request
-		// succeeds; SAP still spends reasoning tokens internally (governed by
-		// max_completion_tokens / max_tokens). Text-only turns keep explicit
-		// reasoning depth. Applies to all gpt-* since SAP may tighten the older
-		// gpt-5/5.4 ids the same way.
-		if (hasTools) return {};
+		// These routes accept the native Responses reasoning configuration.
+		// Older chat-completion routes reject it, including GPT-5.6.
+		const supportsSummaries = GPT_SUMMARY_MODELS[model.id] === true;
+		if (hasTools && !supportsSummaries) return {};
 		const effort =
 			model.thinkingLevelMap?.[
 				reasoning as keyof NonNullable<typeof model.thinkingLevelMap>
 			];
 		if (!effort) return {};
-		return { reasoning_effort: effort };
+		return supportsSummaries
+			? { reasoning: { effort, summary: "auto" } }
+			: { reasoning_effort: effort };
 	}
 	return {};
 }
@@ -862,6 +860,15 @@ export function streamSapAiCore(
 						refusalText: refusal,
 						usage: blocking.getTokenUsage(),
 					};
+				}
+
+				const thinking = blocking.getReasoningContent()?.join("\n\n");
+				if (thinking) {
+					output.content.push({ type: "thinking", thinking });
+					const contentIndex = output.content.length - 1;
+					stream.push({ type: "thinking_start", contentIndex, partial: output });
+					stream.push({ type: "thinking_delta", contentIndex, delta: thinking, partial: output });
+					stream.push({ type: "thinking_end", contentIndex, content: thinking, partial: output });
 				}
 
 				const content = blocking.getContent();
