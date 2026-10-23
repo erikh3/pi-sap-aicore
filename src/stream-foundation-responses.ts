@@ -14,6 +14,7 @@ import { SapOpenAi } from "@sap-ai-sdk/openai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses";
 
 import { debugLog, ensureServiceKey, formatError, resolveResourceGroup } from "./stream.ts";
+import { normalizeContext } from "./normalize-context.ts";
 
 // Pi's converter requires an iterable set of providers whose tool IDs it preserves.
 const SAP_TOOL_CALL_PROVIDERS: ReadonlySet<string> = new Set(["sap-aicore", "sap-aicore-foundation"]);
@@ -44,6 +45,18 @@ export function streamSapFoundationResponses(
 			// omp rewrites static Pi imports into host modules; resolve the installed helper at runtime.
 			const helperUrl = import.meta.resolve("@earendil-works/pi-ai/api/openai-responses-shared");
 			const { convertResponsesMessages, convertResponsesTools, processResponsesStream }: typeof ResponsesHelpers = await import(helperUrl);
+			context = normalizeContext(context, model, options);
+			const transcript = {
+				messages: [
+					{
+						role: "system" as const,
+						content: context.systemPrompt ?? "",
+						toolsAdded: context.tools ?? [],
+						timestamp: 0,
+					},
+					...context.messages,
+				],
+			};
 			const key = ensureServiceKey(options?.apiKey);
 			process.env.AICORE_SERVICE_KEY = key.raw;
 			const resourceGroup = resolveResourceGroup(key);
@@ -56,7 +69,8 @@ export function streamSapFoundationResponses(
 				: "none";
 			const request: Omit<ResponseCreateParamsStreaming, "model"> = {
 				// Pi uses OpenAI 6 types; SAP uses OpenAI 7. These converters emit shared message types only.
-				input: convertResponsesMessages(model, context, SAP_TOOL_CALL_PROVIDERS) as unknown as ResponseCreateParamsStreaming["input"],
+				// The manually normalized transcript has Pi's runtime shape; its private type brand is compile-time only.
+				input: convertResponsesMessages(model, transcript as unknown as Parameters<typeof convertResponsesMessages>[1], SAP_TOOL_CALL_PROVIDERS) as unknown as ResponseCreateParamsStreaming["input"],
 				stream: true,
 				store: false,
 				max_output_tokens: options?.maxTokens ?? model.maxTokens,

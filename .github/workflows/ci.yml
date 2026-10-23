@@ -1,9 +1,7 @@
 name: CI
 
-# Verify gate: typecheck every push to main and every PR. There is no build
-# step — pi loads the .ts sources directly via jiti — so "verify" is
-# `tsc --noEmit`, the same guard that runs locally before `npm publish`
-# (the prepublishOnly script).
+# Verify types and offline regressions on every push to main and every PR.
+# Pi loads the .ts sources directly via jiti; no build step is needed.
 
 on:
   push:
@@ -17,9 +15,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
           cache: npm
@@ -29,3 +27,6 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Offline regression tests
+        run: npm test

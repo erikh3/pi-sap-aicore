@@ -9,7 +9,7 @@ and share one login, so you pick the route per model. See
 
 ## Prerequisites
 
-- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`)
+- pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**
 - Node.js **22.19.0 or newer**
 - An SAP BTP account with AI Core entitlement and an **orchestration deployment**
 - *(optional, for the foundation provider)* one or more **foundation-models
@@ -203,11 +203,11 @@ The model list is composed of three sources, merged at startup:
    npm run update-models
    ```
 
-   This re-fetches the live catalog, applies our family-specific filters
-   (currently `anthropic--claude-*`, `gpt-*`, `gemini-*`, `qwen*`, excluding
-   embedding models), and writes the snapshot to disk. Commit the result. This
-   snapshot is only the auth-free bootstrap used before the first authenticated
-   refresh; at runtime the tenant query below fully replaces it.
+   This re-fetches every entry in models.dev's SAP AI Core catalog and writes
+   the snapshot to disk, without filtering model families or generations.
+   Commit the result. This snapshot is only the auth-free bootstrap used before
+   the first authenticated refresh; at runtime the tenant query below fully
+   replaces it.
 
 2. **`~/.pi/agent/pi-sap-aicore/models-cache.json`** — per-machine catalog
    cache, populated from your **live SAP AI Core tenant** (the
@@ -223,10 +223,14 @@ The model list is composed of three sources, merged at startup:
    /sap-models update
    ```
 
+   Runtime refresh includes supported chat-model families exposed through your
+   tenant's orchestration scenario, not every public catalog entry. Choose models
+   in `/model` or hide entries with the overlay's `exclude` list.
+
    This does not edit the installed npm package and is safe across extension
    updates. The existing Provider objects publish the refreshed model list
-   immediately, without re-registration or `/reload`. A cache older than the
-   bundled snapshot is ignored after extension upgrades.
+   immediately, without re-registration or `/reload`. A non-empty tenant cache
+   remains authoritative even after a newer bundled snapshot is installed.
 
 3. **`~/.pi/agent/pi-sap-aicore/models.json`** — per-machine overlay. Use it for
    cost calibration (the tenant reports CU prices for most models but leaves
@@ -485,6 +489,55 @@ billing is separate; check your BTP invoice for the authoritative figure.
 orchestration entirely. The Bedrock adapter maps Anthropic's top-level
 `cache_read_input_tokens`/`cache_creation_input_tokens`; Azure OpenAI returns
 `prompt_tokens_details`. Both flow through the same dual-convention `mapUsage`.
+
+## Troubleshooting
+
+### Capturing the request payload
+
+SAP's error bodies rarely echo what was sent, so a server-side failure (a 500
+from the LLM Module, an unexpected 400) often can't be diagnosed from the error
+text alone. Point `PI_SAP_AICORE_DEBUG_PAYLOAD` at a file to append one JSON
+line per request and one per error, both keyed by the same `requestId`:
+
+```bash
+PI_SAP_AICORE_DEBUG_PAYLOAD=/tmp/sap-aicore.jsonl pi
+```
+
+Then find the request behind a failure:
+
+```bash
+grep '"kind":"error"' /tmp/sap-aicore.jsonl | tail -1   # note its requestId
+grep '<requestId>' /tmp/sap-aicore.jsonl
+```
+
+> [!WARNING]
+> The log contains your full system prompt and conversation. Review it before
+> attaching it to an issue.
+
+### `An assistant message with 'tool_calls' must be followed by tool messages`
+
+A turn killed mid-stream — a dropped SSE connection, or an interrupt while tool
+calls were in flight — leaves tool calls with no results. Versions up to and
+including 0.4.2 replayed those on every later request, so once it happened the session failed
+the same way until it was abandoned. Upgrade to 0.4.3 or newer: incomplete turns
+are no longer replayed, so an affected session recovers on its next request and
+there is nothing to clean up by hand.
+
+### A model returns 400 only when streaming
+
+SAP orchestration keeps its own per-model streaming allow-list that lags behind
+the Model Library's "Streaming Support" flag. The extension carries a list of
+known-unsupported models and falls back to a single blocking call for them; if
+you hit a new one, please open an issue with the model id.
+
+### Other environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `AICORE_SERVICE_KEY` | Service-key JSON override for one shell, bypassing pi's auth store. |
+| `AICORE_RESOURCE_GROUP` | Overrides the resource group for one shell. See [AI Resource Group](#ai-resource-group). |
+| `PI_SAP_AICORE_DEBUG_PAYLOAD` | Request/error log file — see above. |
+| `PI_SAP_AICORE_CACHE_CONTROL` | Set to `1` to probe Anthropic prompt caching. See [Prompt caching](#prompt-caching--cost-reporting). |
 
 ## Releasing (maintainers)
 

@@ -31,11 +31,11 @@ const loadedCatalog = (ids, cache) => ({
 
 console.log("Snapshot ordering");
 check(
-	!shouldUseCachedSnapshot(
+	shouldUseCachedSnapshot(
 		{ fetchedAt: "2026-07-21T10:00:00.000Z", models: [sapModel("new")] },
 		{ fetchedAt: "2026-07-20T10:00:00.000Z", models: [sapModel("old")] },
 	),
-	"older persisted cache cannot override a newer bundled snapshot",
+	"tenant cache stays authoritative after a newer bundled snapshot",
 );
 check(
 	shouldUseCachedSnapshot(

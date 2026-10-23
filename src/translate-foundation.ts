@@ -15,11 +15,15 @@ import type {
 } from "@sap-ai-sdk/foundation-models";
 import { normalizeToolCallId } from "./tool-call-id.ts";
 
-// pi `Context` → Azure OpenAI chat request. This is the orchestration
-// `translate.ts` minus the Anthropic `cache_control` tagging — that is an
-// Anthropic-via-orchestration concern and has no meaning on the direct
-// OpenAI endpoint, so the foundation path is strictly simpler. The Azure
-// message/content/tool shapes are the standard OpenAI ones (each carries an
+import { assertToolMessagePairing } from "./translate.ts";
+
+// pi `Context` → Azure OpenAI chat request. This mirrors the orchestration
+// `translate.ts` (including its tool-result batching) minus the Anthropic
+// `cache_control` tagging — that is an Anthropic-via-orchestration concern and
+// has no meaning on the direct OpenAI endpoint, so this path is simpler. Keep
+// the two in sync: the tool_call/tool-message pairing rules are identical.
+//
+// The Azure message/content/tool shapes are the standard OpenAI ones (each carries an
 // `& Record<string, any>` escape hatch), so inline literals type-check
 // against the message-level types without importing the content-part types
 // (which the package doesn't re-export from its root).
@@ -101,10 +105,12 @@ export function piContextToAzureOpenAi(context: Context): {
 			continue;
 		}
 
-		messages.push(piUserToAzureOpenAi(msg));
+		if (msg.role === "user") messages.push(piUserToAzureOpenAi(msg));
 	}
 
 	const tools = (context.tools ?? []).map(piToolToAzureOpenAi);
+	// Same invariant, same last line of defence as the orchestration path.
+	assertToolMessagePairing(messages);
 	return { messages, tools };
 }
 
@@ -153,7 +159,8 @@ function piAssistantToAzureOpenAi(
 
 	// OpenAI rejects an assistant message with neither content nor tool_calls.
 	// Match the orchestration path: substitute a single space when there is no
-	// text and no tool call, so conversation alternation stays 1:1 with pi's log.
+	// text and no tool call, so the message validates instead of failing the
+	// whole request.
 	const result: AzureOpenAiChatCompletionRequestAssistantMessage = {
 		role: "assistant",
 		content: text || (toolCalls.length === 0 ? " " : ""),
@@ -245,6 +252,7 @@ function piToolToAzureOpenAi(tool: Tool): AzureOpenAiChatCompletionTool {
 		function: {
 			name: tool.name,
 			description: tool.description,
+			// SAFETY: Pi and SAP both use JSON Schema objects; their TS types differ.
 			parameters: tool.parameters as unknown as Record<string, unknown>,
 		},
 	};

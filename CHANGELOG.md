@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Reasoning GPT foundation models now use SAP's OpenAI Responses client with
-  native summaries and preserved reasoning history. Existing Azure foundation
-  deployments are required; the provider makes no deployment changes.
+  native summaries and preserved reasoning history. All SAP stream entry points,
+  including Responses, use the shared `normalizeContext()` pipeline. Existing
+  Azure foundation deployments are required; the provider makes no deployment changes.
 
 - The orchestration (`sap-aicore`) route now auto-retries transient server-side
   stream failures a bounded number of times (2 retries, 3 attempts total, with
@@ -97,6 +98,174 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholder text (and treats a whitespace-only accumulated text as empty),
   bringing the orchestration translator to parity with the foundation ones.
   Added orchestration coverage to the offline empty-content regression test.
+
+## [0.5.0] - 2026-10-15
+
+### Changed
+
+- Import every entry in models.dev's SAP AI Core catalog in the maintainer
+  bootstrap snapshot. Runtime refreshes continue to query the live SAP tenant
+  and retain the fork's supported chat-family filter. A non-empty tenant cache
+  stays authoritative even when the bundled snapshot is newer.
+- Refreshed the bundled snapshot from 16 to 55 model entries.
+- Updated the development baseline to Pi 1.2.0 while retaining support for
+  Pi 0.81.0 and newer. Adjusted tool argument types for Pi's JSON object contract.
+  This supersedes the intermediate Pi 0.84.4 lockfile update in #23.
+- Updated the locked SAP AI SDK packages to 2.16.0 (#25).
+
+### Fixed
+
+- Restored system prompts and tool declarations with Pi 0.87's normalized
+  transcript context (#24). SAP AI Core requests previously received neither,
+  causing models to narrate shell commands instead of emitting executable tool
+  calls. Legacy Pi context fields remain supported.
+- Preserved newline boundaries between system prompt text blocks in #24's
+  transcript replay, with regression coverage before merging.
+- Isolated standalone compatibility probes with `-ne -e` so the installed
+  extension cannot override the working tree and hide failures. Model-count
+  checks now match exact provider IDs rather than double-counting foundation
+  models as orchestration models; full installed-extension startup remains tested.
+
+### Added
+
+- Offline regression tests for complete bootstrap catalog imports,
+  and prompt/tool transcript replay across all SAP translators, including
+  compaction tool suppression and system updates during tool calls.
+- Offline regression tests now run in CI alongside the typecheck; CI action
+  revisions are pinned to immutable commits.
+
+## [0.4.4] - 2026-08-27
+
+### Fixed
+
+- Excluded `scripts/debug-*.ts` from the published tarball. Local debugging
+  scratch was being packed because `package.json` "files" whitelists `scripts`
+  wholesale and a `.gitignore` rule does not override that; an explicit
+  `"!scripts/debug-*.ts"` entry does. 13 stray files, now 0.
+- Fixed the extension failing to load at pi startup with `Cannot find module
+  '@earendil-works/pi-ai/api/transform-messages'`. 0.4.3 imported pi's shared
+  `transformMessages()` helper straight from its module path. pi's extension
+  loader maps only four pi-ai specifiers for extensions — `@earendil-works/pi-ai`
+  (which resolves to the *compat* entrypoint) plus `/compat`, `/oauth` and
+  `/providers/all` — and anything outside that map behaves differently per build:
+  an npm-layout pi still has its dependencies on disk and resolves it by falling
+  through to Node, a bundled pi has nothing to fall through to and fails. The
+  helper is internal and re-exported from neither mapped root, so it is now
+  vendored as `src/transform-messages.ts`, byte-for-byte equivalent to pi-ai
+  0.81.1 through 0.84.3. The 0.4.3 tool-call pairing fix is unchanged in
+  behaviour.
+
+### Added
+
+- `npm run test:startup` (also in `prepublishOnly`): boots the real pi with the
+  full installed extension set — no `-e`, no `-ne` — against the working tree,
+  which is temporarily swapped in as the live `npm:pi-sap-aicore` via
+  `scripts/dev-link.mjs`. It probes with `pi -p` against a bogus provider, so pi
+  loads every extension and stops before reaching a model: no network, no tokens,
+  ~2s, and extension load failures surface verbatim. `--list-models` alone cannot
+  do this — it swallows load errors and the provider just never registers — so
+  both are asserted.
+- `test:compat` is now `scripts/test-compat.mjs` instead of an inline
+  `pi -e ./index.ts --list-models ...`, and it splits its assertions by what the
+  machine can support. The extension-loads check is credential-free and runs
+  everywhere, including the publish workflow; the model-listing check needs
+  working SAP credentials and is skipped where there are none. The inline form
+  checked only pi's exit code, and pi exits 0 while printing "No models
+  available", so on a runner it asserted nothing at all. It also invoked bare
+  `pi`, which fails whenever the PATH shim cannot run (e.g. mise pointing at a
+  node version with no pi installed); `scripts/resolve-pi.mjs` now finds a pi
+  that actually executes and reports whether it is a bundled or npm build.
+- `test:startup` skips instead of failing where there is no local pi install to
+  swap — a CI runner has no `~/.pi` at all. `test-compat.mjs` carries the
+  credential-free load assertion for those environments.
+- `npm run link:dev` / `unlink:dev` / `status:dev` for the same swap by hand, to
+  run an interactive `pi` against the working tree. The published copy is renamed
+  aside, never deleted, and `link` refuses to run over an existing backup.
+- `scripts/test-transform-messages.mjs`, run first in `npm test`. It fails any
+  value import of a pi specifier outside the loader's map — the class of bug
+  above, which nothing else caught, because every other gate (`tsc --noEmit`,
+  all of `npm test`, and `test:compat`) runs the extension from this repo, where
+  pi-ai is a devDependency and therefore always resolves. The check is static on
+  purpose: booting pi only reproduces the failure on a bundled build. The script
+  also diffs the vendored `transformMessages()` against pi's real one over nine
+  fixtures wherever pi-ai is resolvable, so upstream drift surfaces in CI rather
+  than in a user's session.
+
+## [0.4.3] - 2026-08-26
+
+### Fixed
+
+- Fixed conversations getting permanently stuck on `An assistant message with
+  'tool_calls' must be followed by tool messages responding to each
+  'tool_call_id'`. Both providers now run pi's shared `transformMessages()`
+  helper over the conversation before translating it, the same way every
+  built-in pi API adapter does. It drops errored/aborted assistant turns —
+  a turn killed mid-stream by an SSE drop or an interrupt is persisted by pi
+  with the tool calls it had emitted and no results, and replaying it failed
+  *every* subsequent request in that session with the same ids — and it
+  synthesises results for tool calls orphaned any other way. It also downgrades
+  images for text-only models and normalises thinking blocks across a
+  mid-conversation model switch.
+- Fixed the orchestration translator splitting the tool-message block. A tool
+  result carrying an image is hoisted into a synthetic user message (SAP's
+  tool-message content schema is text-only), which produced
+  `tool, user(image), tool` and made the backend reject every tool_call_id past
+  the first. Tool results are now batched into one contiguous block in
+  `tool_calls` order, with hoisted images following it. The foundation
+  (Azure OpenAI) translator already did this; the orchestration path never got
+  the same fix.
+- An aborted stream is no longer reported to pi as a completed turn. The
+  orchestration and foundation Azure OpenAI streaming loops broke out of the
+  chunk loop on abort and then emitted `done`, persisting a half-built tool call
+  as a successful `toolUse` turn; they now mark the turn `aborted`, matching
+  pi's own adapters.
+- A tool call whose argument JSON never finished streaming — the model hit its
+  output cap mid-call, or the connection dropped — no longer executes with `{}`.
+  The parse failure was swallowed, so the tool ran with no arguments and no
+  error. Both OpenAI-shaped paths now use pi's tolerant `parseStreamingJson`,
+  which recovers the fields the model did emit; it also keeps `arguments` in step
+  with the stream, so pi renders a tool call's arguments as they arrive instead
+  of showing `{}` until the last fragment.
+- A streamed tool call that never received an id is now given one instead of
+  being sent with an empty `tool_call_id`, which failed the same way an
+  unanswered call did. The Bedrock path already did this.
+
+### Added
+
+- Added support for pi 0.84.3's `toolChoice` stream option. pi sets
+  `toolChoice: "none"` on its summarization/compaction turns; the extension
+  ignored it, so the model could answer a compaction request with tool calls —
+  which have no results and then break every following request. All four routes
+  now send no tools for `"none"`. That is the one encoding every backend here
+  understands: SAP documents orchestration's `tool_choice` only as an
+  unvalidated passthrough, and Bedrock's Converse `toolChoice` has no `"none"`
+  member. `"auto"` is every backend's default and needs no encoding.
+- Added a preflight check on both OpenAI-shaped request builders: an assistant
+  `tool_calls` message with an unanswered id now fails locally, naming the ids
+  and where the pairing broke, instead of spending a round trip to come back as
+  an opaque SAP 400. The message is worded so pi classifies it non-retryable —
+  a translation bug cannot succeed on a retry.
+- Added a Troubleshooting section to the README covering
+  `PI_SAP_AICORE_DEBUG_PAYLOAD` request capture (previously undocumented), the
+  tool_call_id error above, streaming-unsupported models, and the full
+  environment-variable reference.
+
+### Changed
+
+- Validated against pi 0.84.3 and moved the development/CI baseline to it. The
+  minimum supported pi version remains 0.81.0: `toolChoice` is simply absent on
+  older pi versions, and the extension behaves exactly as before when it is.
+
+## [0.4.2] - 2026-08-18
+
+### Changed
+
+- Validated the native Provider implementation against pi 0.84.2 and updated the
+  development/CI baseline for `@earendil-works/pi-ai` and
+  `@earendil-works/pi-coding-agent` to 0.84.2. The minimum supported Pi version
+  remains 0.81.0.
+- Added a package-load/model-list compatibility smoke test and included it in the
+  prepublish verification gate.
 
 ## [0.4.1] - 2026-07-21
 
@@ -386,7 +555,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort` for OpenAI).
 - MIT license and npm packaging.
 
-[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.4...v0.5.0
+[0.4.4]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.8...v0.4.0
 [0.3.8]: https://github.com/ttiimmaahh/pi-sap-aicore/compare/v0.3.7...v0.3.8

@@ -26,7 +26,11 @@ The model catalog is a layered **snapshot / cache / overlay**:
 Pi refreshes across both providers. It intentionally keeps the extension's cache
 format instead of writing Pi's generic ModelsStore. Commands:
 `/sap-models update|discover|list|paths|help`. Maintainer snapshot refresh:
-`scripts/update-models.mjs`.
+`scripts/update-models.mjs`. The maintainer snapshot path imports every entry from
+models.dev's `sap-ai-core` catalog without family filtering; the runtime refresh
+(`/sap-models update`, `fetchTenantSapSnapshot`) queries the live SAP tenant and
+is the authoritative source for which models are actually callable. Model selection
+and overlay exclusions belong to the user.
 
 ## Providers registered
 
@@ -44,17 +48,44 @@ Credential storage access belongs in `src/auth.ts`, not stream transports. Provi
 refresh mutates the shared controller's view; never re-register providers to publish
 new models.
 
+## Message translation
+
+Every stream entry point passes context through `normalizeContext()`
+(`src/normalize-context.ts`) before translating. It accepts legacy contexts and
+Pi 0.87+ transcripts, replays system prompt/tool deltas with local structural types
+that also compile against older Pi versions, then removes system messages before
+repairing tool-call pairs. A system update between a tool call and its result
+must not create a synthetic result.
+Message repair drops errored/aborted turns and answers orphaned tool calls;
+skipping it can wedge sessions with `"tool_call_ids did not have response messages"`.
+
+`normalizeContext()` also encodes `options.toolChoice` (pi 0.84.3+): `"none"` —
+which pi sets on summarization/compaction turns — sends no tools at all, because
+that is the only expression of "none" every backend here accepts. Do not
+translate it into a per-backend `tool_choice` field.
+
+The four translators must each keep an assistant `tool_calls` message immediately
+followed by one tool/tool_result entry per id. Image tool results get hoisted into a
+synthetic user message, so hoisted content goes **after** the whole tool block, never
+between two of its entries. `src/translate.ts` and `src/translate-foundation.ts` share
+these rules — fix both together.
+
 ## Validation
 
 Pi loads `index.ts` directly. Validate changes with:
 
 - `npx tsc --noEmit`
 - `npm test`
-- `pi -e ./index.ts --list-models sap-aicore`
-- `pi -e ./index.ts --list-models sap-aicore-foundation`
+- `pi -ne -e ./index.ts --list-models sap-aicore --offline`
+- `pi -ne -e ./index.ts --list-models sap-aicore-foundation --offline`
+- `npm run test:startup` for the full installed-extension set
 - import smoke tests
+
+Use `-ne -e` for standalone probes: `-e` alone also loads the installed copy,
+which can override the working tree's providers and hide failures.
 
 ## Notes
 
-- Minimum supported versions are Pi 0.81.0 and Node.js 22.19.0.
+- Minimum supported versions are Pi 0.81.0 and Node.js 22.19.0; the dev/CI
+  baseline is recorded in `package.json` and `package-lock.json`.
 - SAP reasoning maps to `output_config.effort` (low / medium / high).

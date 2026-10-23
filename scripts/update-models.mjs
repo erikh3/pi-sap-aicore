@@ -71,15 +71,6 @@ function adapt(model) {
 	return adapted;
 }
 
-function shouldInclude(id) {
-	if (id.includes("embed")) return false;
-	return (
-		id.startsWith("anthropic--claude-") ||
-		id.startsWith("gpt-") ||
-		id.startsWith("gemini-") ||
-		id.startsWith("qwen")
-	);
-}
 
 const res = await fetch(SOURCE);
 if (!res.ok) {
@@ -89,7 +80,6 @@ if (!res.ok) {
 const all = await res.json();
 const sapModels = all["sap-ai-core"]?.models ?? {};
 const adapted = Object.values(sapModels)
-	.filter((m) => shouldInclude(m.id))
 	.map(adapt)
 	.sort((a, b) => a.id.localeCompare(b.id));
 

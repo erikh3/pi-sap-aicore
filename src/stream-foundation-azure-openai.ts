@@ -8,11 +8,13 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
+	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { AzureOpenAiChatCompletionParameters } from "@sap-ai-sdk/foundation-models";
 
 import { buildAzureOpenAiParams } from "./foundation-params.ts";
+import { normalizeContext } from "./normalize-context.ts";
 import {
 	debugLog,
 	ensureServiceKey,
@@ -96,7 +98,7 @@ export function streamSapFoundationAzureOpenAi(
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
 
-			const { messages, tools } = piContextToAzureOpenAi(context);
+			const { messages, tools } = piContextToAzureOpenAi(normalizeContext(context, model, options));
 			const params = buildAzureOpenAiParams(model, options);
 
 			const { AzureOpenAiChatClient } = await importFoundation();
@@ -265,11 +267,7 @@ export function streamSapFoundationAzureOpenAi(
 							const fragment = td.function?.arguments ?? "";
 							if (fragment) {
 								slot.partialJson += fragment;
-								try {
-									block.arguments = JSON.parse(slot.partialJson);
-								} catch {
-									// Partial JSON — keep accumulating until valid
-								}
+								block.arguments = parseStreamingJson(slot.partialJson);
 								stream.push({
 									type: "toolcall_delta",
 									contentIndex: slot.contentIndex,
@@ -286,6 +284,7 @@ export function streamSapFoundationAzureOpenAi(
 					chunk.getFinishReason() ?? undefined,
 				);
 			}
+			if (options?.signal?.aborted) throw new Error("Request was aborted");
 
 			closeText();
 			closeThinking();
@@ -304,6 +303,7 @@ export function streamSapFoundationAzureOpenAi(
 					continue;
 				}
 				if (slot.partialJson) block.arguments = JSON.parse(slot.partialJson);
+				if (!block.id) block.id = randomUUID();
 				stream.push({
 					type: "toolcall_end",
 					contentIndex: slot.contentIndex,

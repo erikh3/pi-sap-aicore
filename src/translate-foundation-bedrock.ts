@@ -133,8 +133,10 @@ export function piContextToBedrockConverse(context: Context): {
 			continue;
 		}
 
-		const user = piUserToBedrockConverse(msg);
-		if (user) messages.push(user);
+		if (msg.role === "user") {
+			const user = piUserToBedrockConverse(msg);
+			if (user) messages.push(user);
+		}
 	}
 
 	const tools = (context.tools ?? []).map(piToolToBedrockToolSpec);
@@ -312,6 +314,7 @@ function piToolToBedrockToolSpec(
 			name: tool.name,
 			description: tool.description,
 			inputSchema: {
+				// SAFETY: Pi and SAP both use JSON Schema objects; their TS types differ.
 				json: tool.parameters as unknown as Record<string, unknown>,
 			},
 		},
