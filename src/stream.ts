@@ -752,7 +752,9 @@ export function streamSapAiCore(
 			process.env.AICORE_SERVICE_KEY = serviceKey.raw;
 			const resourceGroup = resolveResourceGroup(serviceKey);
 
-			const { messages, tools } = piContextToOrchestration(normalizeContext(context, model, options));
+			const { messages, tools } = piContextToOrchestration(
+				normalizeContext(context, model, options),
+			);
 
 			const { OrchestrationClient } = await importOrchestration();
 			const llmParams = buildLlmParams(model, options, tools.length > 0);

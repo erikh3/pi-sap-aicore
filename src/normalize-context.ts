@@ -39,13 +39,13 @@ import { transformMessages } from "./transform-messages.ts";
 export function normalizeContext(
 	context: Context,
 	model: Model<Api>,
-	options?: SimpleStreamOptions,
+	options?: ToolChoiceOptions,
 ): Context {
 	const resolved = resolveTranscriptContext(context);
 	return {
 		...resolved,
 		messages: transformMessages(resolved.messages, model),
-		tools: resolveTools(resolved, options),
+		tools: options?.toolChoice === "none" ? [] : resolved.tools,
 	};
 }
 
@@ -120,9 +120,6 @@ function systemContentText(content: TranscriptSystemMessage["content"]): string 
 //
 // "auto" is every backend's default, so it needs no encoding. On pi < 0.84.3
 // the field is simply absent and tools always flow through.
-function resolveTools(
-	context: Context,
-	options?: SimpleStreamOptions,
-): Context["tools"] {
-	return options?.toolChoice === "none" ? [] : context.tools;
-}
+type ToolChoiceOptions = SimpleStreamOptions & {
+	toolChoice?: "auto" | "none";
+};

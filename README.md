@@ -149,10 +149,14 @@ The extension registers **two providers**, both backed by the same service key:
 | Content filter / grounding / templating | yes | no — raw model access |
 | SDK / endpoint | `@sap-ai-sdk/orchestration` | `SapOpenAi.responses` for reasoning GPT models; `AzureOpenAiChatClient` for other Azure models; SAP `/converse` for Bedrock and `generateContent` for Vertex |
 
-Both routes appear in the model list simultaneously, so you choose per model. The
-foundation route exists mainly to access new models directly when orchestration
-lags behind model deployment or streaming support (for example `gpt-5.5` on
-Azure OpenAI or a newly deployed Claude model on AWS Bedrock).
+Both routes appear in the model list simultaneously, so you choose per model. SAP
+applies prompt templating to orchestration messages; the extension preserves
+literal placeholder examples such as `{{?country}}` by splitting the marker
+across adjacent text blocks before submission. The model still receives the same
+text, while SAP does not execute it as a template variable. The foundation route
+exists mainly to access new models directly when orchestration lags behind model
+deployment or streaming support (for example `gpt-5.5` on Azure OpenAI or a
+newly deployed Claude model on AWS Bedrock).
 
 **Adding a foundation model:** it needs its own foundation-models deployment in
 SAP AI Core — one per (model, version, resource group). The extension chooses the
