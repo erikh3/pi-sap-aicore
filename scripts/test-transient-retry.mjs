@@ -75,6 +75,36 @@ check(
 	"gateway JSON.parse SyntaxError is transient",
 );
 
+// Envoy "no healthy upstream" (zero healthy backend pods). Bun truncates the
+// body to its first token ("no"); V8 reports the full body without a trailing
+// ellipsis. Both must still classify as transient AND be diagnosed as Envoy.
+check(
+	isTransientServerError(
+		new SyntaxError(`JSON Parse error: Unexpected identifier "no"`),
+	),
+	"Bun no-healthy-upstream SyntaxError is transient",
+);
+check(
+	isTransientServerError(
+		new SyntaxError(`Unexpected token 'o', "no healthy upstream" is not valid JSON`),
+	),
+	"V8 no-healthy-upstream SyntaxError is transient",
+);
+check(
+	/gateway \(Envoy\)/.test(
+		formatError(new SyntaxError(`JSON Parse error: Unexpected identifier "no"`)),
+	),
+	"Bun no-healthy-upstream is diagnosed as Envoy",
+);
+check(
+	/gateway \(Envoy\)/.test(
+		formatError(
+			new SyntaxError(`Unexpected token 'o', "no healthy upstream" is not valid JSON`),
+		),
+	),
+	"V8 no-healthy-upstream is diagnosed as Envoy",
+);
+
 // --- terminal: never retried ----------------------------------------------
 
 check(

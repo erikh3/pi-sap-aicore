@@ -164,17 +164,28 @@ function looksLikeSapGatewayJsonParseFailure(error: unknown): boolean {
 
 function sapGatewayHint(error: SyntaxError): string {
 	const msg = error.message;
-	// V8 (Node): `Unexpected token 'X', "<snippet>"... is not valid JSON`
-	const v8Match = msg.match(/"([^"]+)"\.\.\./);
-	// Bun: `JSON Parse error: Unexpected identifier "<word>"`
+	// V8 (Node) truncated: `Unexpected token 'X', "<snippet>"... is not valid JSON`
+	// V8 (Node) full body:  `Unexpected token 'X', "<body>" is not valid JSON`
+	//   (short bodies carry no trailing ellipsis, so match that form too).
+	const v8Match =
+		msg.match(/"([^"]+)"\.\.\./) ?? msg.match(/"([^"]+)" is not valid JSON/);
+	// Bun: `JSON Parse error: Unexpected identifier "<word>"` (first token only)
 	const bunMatch = msg.match(/Unexpected identifier "([^"]+)"/);
 	const snippet = v8Match?.[1] ?? bunMatch?.[1];
 	const body = snippet ? ` Body started with: "${snippet}...".` : "";
-	const looksLikeEnvoy = snippet !== undefined && /^upstream\b/i.test(snippet);
+	// Envoy's two common plain-text bodies are "upstream connect error" and
+	// "no healthy upstream" (zero healthy backend pods). On Bun the parser only
+	// surfaces the first token, so "no healthy upstream" arrives as bare "no".
+	const looksLikeEnvoy =
+		snippet !== undefined &&
+		(/^upstream\b/i.test(snippet) ||
+			/^no healthy\b/i.test(snippet) ||
+			/^no$/i.test(snippet));
 	const diagnosis = looksLikeEnvoy
 		? "SAP AI Core's gateway (Envoy) returned a plain-text error instead of JSON. " +
-			"This is almost always transient — upstream connect failure, gateway " +
-			"timeout on a long reasoning turn, or a non-JSON 429/503 from the proxy."
+			"This is almost always transient: no healthy backend pods, an upstream " +
+			"connect failure, a gateway timeout on a long reasoning turn, or a " +
+			"non-JSON 429/503 from the proxy."
 		: "SAP AI Core returned a non-JSON response body. Likely a transient " +
 			"gateway/proxy error (timeout, upstream unreachable, or non-JSON 5xx).";
 	return (
