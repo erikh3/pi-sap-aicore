@@ -2,7 +2,7 @@ import type {
 	AssistantMessage,
 	Context,
 	Message,
-	TextContent,
+	TextContent as PiTextContent,
 	Tool,
 	ToolCall,
 	ToolResultMessage,
@@ -30,7 +30,34 @@ const CACHE_CONTROL_ENABLED =
 	process.env.PI_SAP_AICORE_CACHE_CONTROL === "1";
 
 type CacheControl = { type: "ephemeral" };
+type OrchestrationTextContent = {
+	type: "text";
+	text: string;
+	cache_control?: CacheControl;
+};
 const EPHEMERAL: CacheControl = { type: "ephemeral" };
+const SAP_PLACEHOLDER_START = "{{?";
+
+// SAP applies placeholder substitution to every message passed as a prompt
+// template. Keep literal examples byte-for-byte intact for the model by splitting
+// the marker across adjacent text blocks, so no individual block is executable
+// templating syntax.
+export function literalPlaceholderContent(
+	text: string,
+): string | OrchestrationTextContent[] {
+	let marker = text.indexOf(SAP_PLACEHOLDER_START);
+	if (marker === -1) return text;
+
+	const blocks: OrchestrationTextContent[] = [];
+	let start = 0;
+	while (marker !== -1) {
+		blocks.push({ type: "text", text: text.slice(start, marker + 2) });
+		start = marker + 2;
+		marker = text.indexOf(SAP_PLACEHOLDER_START, start);
+	}
+	blocks.push({ type: "text", text: text.slice(start) });
+	return blocks;
+}
 
 export function piContextToOrchestration(context: Context): {
 	messages: ChatMessage[];
@@ -41,7 +68,7 @@ export function piContextToOrchestration(context: Context): {
 	if (context.systemPrompt) {
 		messages.push(
 			tagCacheControl(
-				{ role: "system", content: context.systemPrompt },
+				{ role: "system", content: literalPlaceholderContent(context.systemPrompt) },
 				CACHE_CONTROL_ENABLED,
 			),
 		);
@@ -224,18 +251,22 @@ function tagCacheControl(msg: ChatMessage, enabled: boolean): ChatMessage {
 
 function piUserToOrchestration(msg: UserMessage): ChatMessage {
 	if (typeof msg.content === "string") {
-		return { role: "user", content: msg.content };
+		return { role: "user", content: literalPlaceholderContent(msg.content) };
 	}
 
-	const items: UserChatMessageContentItem[] = msg.content.map((part) => {
+	const items: UserChatMessageContentItem[] = [];
+	for (const part of msg.content) {
 		if (part.type === "text") {
-			return { type: "text", text: part.text };
+			const content = literalPlaceholderContent(part.text);
+			if (typeof content === "string") items.push({ type: "text", text: content });
+			else items.push(...content);
+		} else {
+			items.push({
+				type: "image_url",
+				image_url: { url: `data:${part.mimeType};base64,${part.data}` },
+			});
 		}
-		return {
-			type: "image_url",
-			image_url: { url: `data:${part.mimeType};base64,${part.data}` },
-		};
-	});
+	}
 
 	return { role: "user", content: items as UserChatMessageContent };
 }
@@ -277,7 +308,11 @@ function piAssistantToOrchestration(
 	const hasText = text.trim().length > 0;
 	const result: AssistantChatMessage = {
 		role: "assistant",
-		content: hasText ? text : toolCalls.length === 0 ? "(interrupted)" : "",
+		content: hasText
+			? literalPlaceholderContent(text)
+			: toolCalls.length === 0
+				? "(interrupted)"
+				: "",
 	};
 	if (toolCalls.length > 0) result.tool_calls = toolCalls;
 	return result;
@@ -313,11 +348,12 @@ function piToolResultToOrchestrationParts(
 		// Anthropic rejects empty tool_result content; fall back to a
 		// non-whitespace placeholder (pointing at the hoisted image when there
 		// is one) so the request validates.
-		content:
+		content: literalPlaceholderContent(
 			text ||
-			(imageMessages.length > 0
-				? "Tool returned image content; image(s) follow in the next user message."
-				: "(no output)"),
+				(imageMessages.length > 0
+					? "Tool returned image content; image(s) follow in the next user message."
+					: "(no output)"),
+		),
 	};
 
 	return { toolMessage, imageMessages };
@@ -340,13 +376,14 @@ function missingToolResultMessage(toolCallId: string): ChatMessage {
 function piToolResultToSyntheticUserMessages(
 	msg: ToolResultMessage,
 ): ChatMessage[] {
+	const text = `Tool result for ${msg.toolName} (${msg.toolCallId}):\n${
+		toolResultText(msg) || "[no textual output]"
+	}`;
+	const safeText = literalPlaceholderContent(text);
 	const content: UserChatMessageContentItem[] = [
-		{
-			type: "text",
-			text: `Tool result for ${msg.toolName} (${msg.toolCallId}):\n${
-				toolResultText(msg) || "[no textual output]"
-			}`,
-		},
+		...(typeof safeText === "string"
+			? [{ type: "text" as const, text: safeText }]
+			: safeText),
 		...toolResultImages(msg).map((img) => ({
 			type: "image_url" as const,
 			image_url: { url: `data:${img.mimeType};base64,${img.data}` },
@@ -357,7 +394,7 @@ function piToolResultToSyntheticUserMessages(
 
 function toolResultText(msg: ToolResultMessage): string {
 	return msg.content
-		.filter((part): part is TextContent => part.type === "text")
+		.filter((part): part is PiTextContent => part.type === "text")
 		.map((part) => part.text)
 		.join("\n");
 }

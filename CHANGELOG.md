@@ -41,6 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OMP orchestration conversations no longer fail with `Input Parameters: Error
+  validating parameters. Unused parameters: ['country']` when a user message or
+  tool result contains literal SAP placeholder syntax such as `{{?country}}`.
+  SAP applies templating to the whole OMP conversation. The translator now splits
+  each literal placeholder marker across adjacent text blocks before submitting
+  the prompt, so SAP cannot execute it while the model still receives the exact
+  text after content blocks are concatenated. This covers system, user,
+  assistant, and tool-result text on both streaming and blocking requests. Added
+  an offline regression for the original tool-result trigger
+  (`test-orchestration-literal-placeholders.mjs`).
+
 - GPT-6 routes and GPT-5.3 Codex now request reasoning summaries with tools
   attached instead of dropping reasoning for every GPT model. GPT-5.6 retains
   the orchestration tool restriction. Blocking responses now emit returned
