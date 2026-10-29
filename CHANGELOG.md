@@ -41,6 +41,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SAP AI Core gateway errors with a non-JSON body (Envoy/Istio `no healthy
+  upstream`, `upstream connect error`, timeouts) now surface the full body text
+  and an actionable diagnosis instead of a raw `JSON Parse error: Unexpected
+  identifier "no"`. `@sap-ai-sdk/core`'s `handleStreamError` (http-client.js)
+  `JSON.parse`d the error body unconditionally (axios#6468), throwing a
+  `SyntaxError` that escaped before the SDK's status-code wrapper and discarded
+  both the status and the body. A new patch
+  (`patches/@sap-ai-sdk+core+2.17.0.patch`) keeps the raw text on
+  `error.response.data` when it is not JSON, so `formatError` reports the
+  complete gateway message (e.g. `no healthy upstream`, meaning zero healthy
+  backend pods) with the Envoy diagnosis. `no healthy upstream` is also now
+  classified transient, so it auto-retries. The previous `SyntaxError`-based
+  hint remains as a fallback for dev installs that skip the postinstall patch.
+  Extended `test-transient-retry.mjs`.
+
 - OMP orchestration conversations no longer fail with `Input Parameters: Error
   validating parameters. Unused parameters: ['country']` when a user message or
   tool result contains literal SAP placeholder syntax such as `{{?country}}`.

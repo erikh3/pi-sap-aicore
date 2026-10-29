@@ -1,0 +1,28 @@
+diff --git a/node_modules/@sap-ai-sdk/core/dist/http-client.js b/node_modules/@sap-ai-sdk/core/dist/http-client.js
+--- a/node_modules/@sap-ai-sdk/core/dist/http-client.js
++++ b/node_modules/@sap-ai-sdk/core/dist/http-client.js
+@@ -1,5 +1,5 @@
+ import { Readable } from 'node:stream';
+-import { json } from 'node:stream/consumers';
++import { text } from 'node:stream/consumers';
+ import { executeHttpRequest } from '@sap-cloud-sdk/http-client';
+ import { ErrorWithCause, mergeIgnoreCase, pickValueIgnoreCase, removeLeadingSlashes, removeTrailingSlashes } from '@sap-cloud-sdk/util';
+ import { getAiCoreDestination } from './context.js';
+@@ -51,10 +51,16 @@ export async function executeRequest(endpointOptions, data, requestConfig, desti
+         throw new ErrorWithCause(`Request failed with status code ${error.status}.`, error);
+     }
+ }
+ async function handleStreamError(error) {
+     if (error.response?.data && error.config.responseType === 'stream') {
+         const readable = Readable.from(error.response.data);
+-        error.response.data = await json(readable);
++        const raw = await text(readable);
++        try {
++            error.response.data = JSON.parse(raw);
++        }
++        catch {
++            error.response.data = raw;
++        }
+     }
+ }
+ function mergeWithDefaultRequestConfig(apiVersion, resourceGroup, requestConfig) {

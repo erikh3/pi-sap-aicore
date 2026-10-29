@@ -105,6 +105,40 @@ check(
 	"V8 no-healthy-upstream is diagnosed as Envoy",
 );
 
+// --- patched SDK path: full body recovered on error.response.data ---------
+// patches/@sap-ai-sdk+core+2.17.0.patch makes handleStreamError keep the raw
+// plain-text body instead of throwing a SyntaxError, so the gateway error now
+// arrives as ErrorWithCause(message, axiosError) with the full body on
+// axiosError.response.data. formatError must surface the complete body (not a
+// truncated "no" token) plus the Envoy diagnosis.
+function sapGatewayError(body, status) {
+	const axiosErr = new Error(`Request failed with status code ${status}`);
+	axiosErr.response = { data: body };
+	const wrapper = new Error(`Request failed with status code ${status}.`);
+	wrapper.cause = axiosErr;
+	return wrapper;
+}
+
+const patched503 = sapGatewayError("no healthy upstream", 503);
+check(
+	/no healthy upstream/.test(formatError(patched503)),
+	"patched path surfaces the full gateway body verbatim",
+);
+check(
+	/gateway \(Envoy\)/.test(formatError(patched503)),
+	"patched no-healthy-upstream is diagnosed as Envoy",
+);
+check(
+	isTransientServerError(patched503),
+	"patched no-healthy-upstream is transient",
+);
+// No status code in the wrapper: classification must come from the body phrase
+// alone, proving the "no healthy upstream" regex alternative pulls its weight.
+check(
+	isTransientServerError(sapGatewayError("no healthy upstream", undefined)),
+	"no-healthy-upstream body is transient even without a 5xx status code",
+);
+
 // --- terminal: never retried ----------------------------------------------
 
 check(

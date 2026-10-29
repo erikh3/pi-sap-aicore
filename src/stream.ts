@@ -102,11 +102,38 @@ function truncate(s: string, max = MAX_DETAIL_CHARS): string {
 // Try known server-error shapes first (SAP, Anthropic-via-orchestration),
 // fall back to JSON. Returns undefined when there's nothing meaningful to
 // say beyond what .message already conveyed.
+// Envoy/Istio emit a few plain-text (non-JSON) bodies when the backend is
+// unreachable or has no ready pods. @sap-ai-sdk/core is patched (see
+// patches/@sap-ai-sdk+core+2.17.0.patch) so these survive verbatim on
+// `error.response.data`; recognize them to show an actionable diagnosis and
+// classify the failure as transient.
+const ENVOY_PLAINTEXT =
+	/^\s*(no healthy upstream|upstream connect error|upstream request timeout|no route to host)/i;
+
+const ENVOY_DIAGNOSIS =
+	"SAP AI Core's gateway (Envoy) returned a plain-text error instead of JSON. " +
+	"This is almost always transient: no healthy backend pods, an upstream " +
+	"connect failure, a gateway timeout on a long reasoning turn, or a " +
+	"non-JSON 429/503 from the proxy.";
+
+const GENERIC_NONJSON_DIAGNOSIS =
+	"SAP AI Core returned a non-JSON response body. Likely a transient " +
+	"gateway/proxy error (timeout, upstream unreachable, or non-JSON 5xx).";
+
+const RETRY_ADVICE =
+	"Retry usually works; if it persists, check the SAP AI Core service status " +
+	"and that your deployment + resource group are healthy.";
+
 function extractServerDetail(data: unknown): string | undefined {
 	if (data == null) return undefined;
 	if (typeof data === "string") {
 		const trimmed = data.trim();
-		return trimmed.length > 0 ? truncate(trimmed) : undefined;
+		if (trimmed.length === 0) return undefined;
+		// With the SDK patch, Envoy's plain-text body lands here intact.
+		if (ENVOY_PLAINTEXT.test(trimmed)) {
+			return truncate(`${ENVOY_DIAGNOSIS} ${RETRY_ADVICE} Body: "${trimmed}".`);
+		}
+		return truncate(trimmed);
 	}
 	if (typeof data !== "object") return truncate(String(data));
 
@@ -133,22 +160,18 @@ function extractServerDetail(data: unknown): string | undefined {
 	}
 }
 
-// SAP SDK upstream bug: @sap-ai-sdk/core's `handleStreamError` (in
-// http-client.js) does an unconditional `JSON.parse` on the response
-// body via `node:stream/consumers`'s `json()`. When SAP AI Core's
-// gateway (Envoy/Istio) returns a plain-text error like
-//   `upstream connect error and disconnect/reset before headers...`
-// — typical for transient backend unreachability, gateway timeouts,
-// or some rate-limit responses — `JSON.parse` throws a raw V8
-// SyntaxError that escapes BEFORE the SDK's `throw new ErrorWithCause`
-// wrapper, so we lose the status code and any structured context.
-//
-// Detect that exact shape so the user sees something actionable
-// instead of `Unexpected token 'u', "upstream c"... is not valid JSON`.
-// We also try to recover the original gateway body text from the
-// SyntaxError message itself (V8 includes the first ~chars of the
-// offending input as `"upstream c"...`), so the user can tell
-// envoy-from-anything-else apart at a glance.
+// Fallback for dev installs that skipped the postinstall patch. Without
+// patches/@sap-ai-sdk+core+2.17.0.patch, @sap-ai-sdk/core's `handleStreamError`
+// (http-client.js) does an unconditional `JSON.parse` on the response body via
+// `node:stream/consumers`'s `json()`. When SAP AI Core's gateway (Envoy/Istio)
+// returns a plain-text error like
+//   `no healthy upstream` or `upstream connect error and disconnect/reset ...`
+// `JSON.parse` throws a raw SyntaxError that escapes BEFORE the SDK's
+// `throw new ErrorWithCause` wrapper, so we lose the status code and the body.
+// The patched build routes these bodies through extractServerDetail with the
+// full text preserved; this path only fires when the patch is absent. We still
+// recover the first chars of the body from the SyntaxError message so the hint
+// can tell envoy-from-anything-else apart at a glance.
 function looksLikeSapGatewayJsonParseFailure(error: unknown): boolean {
 	if (!(error instanceof SyntaxError)) return false;
 	const msg = error.message ?? "";
@@ -181,16 +204,9 @@ function sapGatewayHint(error: SyntaxError): string {
 		(/^upstream\b/i.test(snippet) ||
 			/^no healthy\b/i.test(snippet) ||
 			/^no$/i.test(snippet));
-	const diagnosis = looksLikeEnvoy
-		? "SAP AI Core's gateway (Envoy) returned a plain-text error instead of JSON. " +
-			"This is almost always transient: no healthy backend pods, an upstream " +
-			"connect failure, a gateway timeout on a long reasoning turn, or a " +
-			"non-JSON 429/503 from the proxy."
-		: "SAP AI Core returned a non-JSON response body. Likely a transient " +
-			"gateway/proxy error (timeout, upstream unreachable, or non-JSON 5xx).";
+	const diagnosis = looksLikeEnvoy ? ENVOY_DIAGNOSIS : GENERIC_NONJSON_DIAGNOSIS;
 	return (
-		`${diagnosis}${body} Retry usually works; if it persists, check the SAP AI ` +
-		`Core service status and that your deployment + resource group are healthy. ` +
+		`${diagnosis}${body} ${RETRY_ADVICE} ` +
 		`(Underlying SDK bug: @sap-ai-sdk/core's handleStreamError JSON.parses the ` +
 		`error body unconditionally; see axios#6468.)`
 	);
@@ -306,7 +322,7 @@ function isStreamingUnsupportedError(error: unknown): boolean {
 // duplicate already-streamed output. Persistent 400s (bad params, unsupported
 // model, oversized context) never match and surface immediately.
 const TRANSIENT_SERVER_ERROR =
-	/try your request again|unexpected error during processing|upstream connect error|service unavailable|temporarily unavailable|status code 50[0-9]|SAP 50[0-9]/i;
+	/try your request again|unexpected error during processing|upstream connect error|no healthy upstream|service unavailable|temporarily unavailable|status code 50[0-9]|SAP 50[0-9]/i;
 
 export function isTransientServerError(error: unknown): boolean {
 	// The gateway's plain-text "upstream connect error" surfaces as a raw
