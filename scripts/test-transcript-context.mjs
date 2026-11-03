@@ -87,3 +87,40 @@ test("system deltas between a tool call and its result do not create synthetic r
 	assert.deepEqual(piContextToOrchestration(normalized).messages.map((message) => message.role),
 		["system", "assistant", "tool"]);
 });
+
+test("OMP developer follow-ups reach every SAP route after the completed assistant turn", () => {
+	const assistant = { role: "assistant", api: model.api, provider: model.provider, model: model.id,
+		content: [{ type: "text", text: "READY" }], stopReason: "stop", timestamp: 2 };
+	for (const content of ["Reply NEXT", [{ type: "text", text: "Reply NEXT" }]]) {
+		const context = { systemPrompt: "Base prompt", messages: [user, assistant,
+			{ role: "developer", content, attribution: "agent", timestamp: 3 }] };
+		const normalized = normalizeContext(context, model);
+		for (const [name, translate] of translators) {
+			const request = translate(normalized);
+			const messages = request.messages ?? request.contents;
+			assert.equal(messages.length, name === "orchestration" || name === "Azure OpenAI" ? 4 : 3, name);
+			assert.match(JSON.stringify(messages.at(-1)), /Reply NEXT/, name);
+			assert.match(JSON.stringify(messages.at(-2)), /READY/, name);
+			if (name === "orchestration" || name === "Azure OpenAI") assert.equal(messages.at(-1).role, name === "orchestration" ? "developer" : "system", name);
+		}
+	}
+});
+
+test("a developer interruption preserves the unanswered tool result boundary", () => {
+	const context = { messages: [user,
+		{ role: "assistant", api: model.api, provider: model.provider, model: model.id,
+			content: [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }], stopReason: "toolUse", timestamp: 2 },
+		{ role: "developer", content: "Stop reading and answer NEXT", timestamp: 3 }] };
+	const normalized = normalizeContext(context, model);
+	for (const [name, translate] of translators) {
+		const request = translate(normalized);
+		const messages = request.messages ?? request.contents;
+		assert.match(JSON.stringify(messages.at(-1)), /Stop reading and answer NEXT/, name);
+		if (name === "orchestration" || name === "Azure OpenAI") {
+			assert.equal(messages.at(-2).role, "tool", name);
+			assert.equal(messages.at(-2).tool_call_id, "call_1", name);
+		} else {
+			assert.match(JSON.stringify(messages.at(-1)), /No result provided/, name);
+		}
+	}
+});

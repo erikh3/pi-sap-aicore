@@ -496,6 +496,19 @@ orchestration entirely. The Bedrock adapter maps Anthropic's top-level
 
 ## Troubleshooting
 
+### OMP extension questions or Continue produce no answer
+
+OMP sends extension questions, todo reminders, and Continue as developer messages.
+The SAP translators preserve them in conversation order. Older versions dropped
+these messages, leaving SAP to answer the previous request again, sometimes with
+an empty response. Restart OMP after installing a release containing this fix;
+the transcript does not need to be rewritten.
+
+Orchestration sends the developer role directly. Azure Chat Completions uses a
+system message at the same position. Bedrock and Vertex use a user turn because
+their conversation schemas have no developer role. The Responses route preserves
+the instruction through its native converter. The base system prompt is unchanged.
+
 ### Capturing the request payload
 
 SAP's error bodies rarely echo what was sent, so a server-side failure (a 500

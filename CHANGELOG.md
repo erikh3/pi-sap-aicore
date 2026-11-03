@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve OMP developer messages, including extension questions, todo reminders,
+  and Continue, instead of silently dropping their instructions from SAP requests.
+  Orchestration keeps the developer role; foundation routes use their supported
+  instruction representation without changing the base system-prompt prefix.
+
 - SAP AI Core gateway errors with a non-JSON body (Envoy/Istio `no healthy
   upstream`, `upstream connect error`, timeouts) now surface the full body text
   and an actionable diagnosis instead of a raw `JSON Parse error: Unexpected
