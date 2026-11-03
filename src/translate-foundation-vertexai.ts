@@ -7,6 +7,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
+import { contextMessages, type SapDeveloperMessage } from "./normalize-context.ts";
 
 export type VertexPart =
 	| { text: string }
@@ -38,7 +39,7 @@ export function piContextToVertexGenerateContent(context: Context): {
 } {
 	const contents: VertexContent[] = [];
 
-	for (const msg of context.messages) {
+	for (const msg of contextMessages(context)) {
 		const translated = piMessageToVertexContent(msg);
 		if (translated) contents.push(translated);
 	}
@@ -62,10 +63,12 @@ export function piContextToVertexGenerateContent(context: Context): {
 	};
 }
 
-function piMessageToVertexContent(msg: Message): VertexContent | undefined {
+function piMessageToVertexContent(msg: Message | SapDeveloperMessage): VertexContent | undefined {
 	switch (msg.role) {
 		case "user":
 			return piUserToVertexContent(msg);
+		case "developer":
+			return piUserToVertexContent({ ...msg, role: "user" });
 		case "assistant":
 			return piAssistantToVertexContent(msg);
 		case "toolResult":

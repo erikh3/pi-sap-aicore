@@ -14,7 +14,7 @@ import { SapOpenAi } from "@sap-ai-sdk/openai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses";
 
 import { debugLog, ensureServiceKey, formatError, resolveResourceGroup } from "./stream.ts";
-import { normalizeContext } from "./normalize-context.ts";
+import { contextMessages, developerMessageText, normalizeContext } from "./normalize-context.ts";
 
 // Pi's converter requires an iterable set of providers whose tool IDs it preserves.
 const SAP_TOOL_CALL_PROVIDERS: ReadonlySet<string> = new Set(["sap-aicore", "sap-aicore-foundation"]);
@@ -46,6 +46,8 @@ export function streamSapFoundationResponses(
 			const helperUrl = import.meta.resolve("@earendil-works/pi-ai/api/openai-responses-shared");
 			const { convertResponsesMessages, convertResponsesTools, processResponsesStream }: typeof ResponsesHelpers = await import(helperUrl);
 			context = normalizeContext(context, model, options);
+			// Pi's Responses converter understands system updates, not OMP's
+			// developer role. Keep each instruction in place and let it map the role.
 			const transcript = {
 				messages: [
 					{
@@ -54,7 +56,9 @@ export function streamSapFoundationResponses(
 						toolsAdded: context.tools ?? [],
 						timestamp: 0,
 					},
-					...context.messages,
+					...contextMessages(context).map(message => message.role === "developer"
+						? { ...message, role: "system" as const, content: developerMessageText(message) }
+						: message),
 				],
 			};
 			const key = ensureServiceKey(options?.apiKey);
@@ -67,10 +71,11 @@ export function streamSapFoundationResponses(
 			const effort = level
 				? model.thinkingLevelMap?.[level as keyof NonNullable<typeof model.thinkingLevelMap>] ?? level
 				: "none";
+			const conversionOptions = { supportsMidConvoSystemMessages: true, includeSystemPrompt: true };
 			const request: Omit<ResponseCreateParamsStreaming, "model"> = {
 				// Pi uses OpenAI 6 types; SAP uses OpenAI 7. These converters emit shared message types only.
 				// The manually normalized transcript has Pi's runtime shape; its private type brand is compile-time only.
-				input: convertResponsesMessages(model, transcript as unknown as Parameters<typeof convertResponsesMessages>[1], SAP_TOOL_CALL_PROVIDERS) as unknown as ResponseCreateParamsStreaming["input"],
+				input: convertResponsesMessages(model, transcript as unknown as Parameters<typeof convertResponsesMessages>[1], SAP_TOOL_CALL_PROVIDERS, conversionOptions) as unknown as ResponseCreateParamsStreaming["input"],
 				stream: true,
 				store: false,
 				max_output_tokens: options?.maxTokens ?? model.maxTokens,

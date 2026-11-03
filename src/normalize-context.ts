@@ -1,10 +1,29 @@
 import type {
 	Api,
 	Context,
+	Message,
 	Model,
 	SimpleStreamOptions,
+	TextContent,
 } from "@earendil-works/pi-ai";
 import { transformMessages } from "./transform-messages.ts";
+
+/** Instruction turn supplied by OMP's provider context, absent from older Pi typings. */
+export type SapDeveloperMessage = {
+	role: "developer";
+	content: string | TextContent[];
+	timestamp: number;
+};
+
+/** OMP passes developer messages that older Pi message typings do not declare. */
+export function contextMessages(context: Context): Array<Message | SapDeveloperMessage> {
+	return context.messages as Array<Message | SapDeveloperMessage>;
+}
+
+/** Preserve instruction text without moving it into the base prompt. */
+export function developerMessageText(message: SapDeveloperMessage): string {
+	return typeof message.content === "string" ? message.content : message.content.map(part => part.text).join("\n");
+}
 
 // Pi 0.87+ hands `provider.stream()` a normalized transcript whose system
 // messages carry the current prompt and tool declarations. Older Pi versions

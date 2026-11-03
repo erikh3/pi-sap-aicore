@@ -16,6 +16,7 @@ import type {
 	UserChatMessageContentItem,
 } from "@sap-ai-sdk/orchestration";
 import { normalizeToolCallId } from "./tool-call-id.ts";
+import { contextMessages, developerMessageText, type SapDeveloperMessage } from "./normalize-context.ts";
 
 // Anthropic prompt caching via SAP orchestration is undocumented. SAP's
 // ChatMessage schemas are strictly typed (no Record<string,any> escape
@@ -74,7 +75,7 @@ export function piContextToOrchestration(context: Context): {
 		);
 	}
 
-	const pi = context.messages;
+	const pi = contextMessages(context);
 	// Anthropic caches up to 4 breakpoints; tagging the LAST user message
 	// (after the system prompt) is the standard "keep the long prefix
 	// cached" pattern. We tag at most 1 here for safety; expand later
@@ -104,6 +105,8 @@ export function piContextToOrchestration(context: Context): {
 			messages.push(...piToolResultToSyntheticUserMessages(msg));
 		} else if (msg.role === "user") {
 			messages.push(piUserToOrchestration(msg));
+		} else if (msg.role === "developer") {
+			messages.push({ role: "developer", content: literalPlaceholderContent(developerMessageText(msg)) });
 		}
 
 		const tagLast = CACHE_CONTROL_ENABLED && piIndex === lastUserIdx;
@@ -182,7 +185,7 @@ export function assertToolMessagePairing(
 // index of the last pi message consumed.
 function pushToolResultBlock(
 	messages: ChatMessage[],
-	pi: Message[],
+	pi: Array<Message | SapDeveloperMessage>,
 	assistantIndex: number,
 	expectedIds: string[],
 ): number {

@@ -7,6 +7,7 @@ import type {
 	UserMessage,
 } from "@earendil-works/pi-ai";
 import { normalizeToolCallId } from "./tool-call-id.ts";
+import { contextMessages } from "./normalize-context.ts";
 
 export type BedrockConverseContentBlock =
 	| { text: string }
@@ -52,7 +53,7 @@ export function piContextToBedrockConverse(context: Context): {
 	toolConfig?: BedrockToolConfig;
 } {
 	const messages: BedrockConverseMessage[] = [];
-	const pi = context.messages;
+	const pi = contextMessages(context);
 
 	for (let i = 0; i < pi.length; i++) {
 		const msg = pi[i];
@@ -133,8 +134,9 @@ export function piContextToBedrockConverse(context: Context): {
 			continue;
 		}
 
-		if (msg.role === "user") {
-			const user = piUserToBedrockConverse(msg);
+		// Converse has no developer role; preserve the instruction as a user turn.
+		if (msg.role === "user" || msg.role === "developer") {
+			const user = piUserToBedrockConverse(msg.role === "developer" ? { ...msg, role: "user" } : msg);
 			if (user) messages.push(user);
 		}
 	}

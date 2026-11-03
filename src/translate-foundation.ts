@@ -14,6 +14,7 @@ import type {
 	AzureOpenAiChatCompletionTool,
 } from "@sap-ai-sdk/foundation-models";
 import { normalizeToolCallId } from "./tool-call-id.ts";
+import { contextMessages, developerMessageText } from "./normalize-context.ts";
 
 import { assertToolMessagePairing } from "./translate.ts";
 
@@ -37,7 +38,7 @@ export function piContextToAzureOpenAi(context: Context): {
 		messages.push({ role: "system", content: context.systemPrompt });
 	}
 
-	const pi = context.messages;
+	const pi = contextMessages(context);
 	for (let i = 0; i < pi.length; i++) {
 		const msg = pi[i];
 
@@ -105,7 +106,9 @@ export function piContextToAzureOpenAi(context: Context): {
 			continue;
 		}
 
+		// This Chat Completions client exposes system instructions, not developer messages.
 		if (msg.role === "user") messages.push(piUserToAzureOpenAi(msg));
+		else if (msg.role === "developer") messages.push({ role: "system", content: developerMessageText(msg) });
 	}
 
 	const tools = (context.tools ?? []).map(piToolToAzureOpenAi);
