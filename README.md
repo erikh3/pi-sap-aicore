@@ -7,6 +7,12 @@ foundation endpoints such as Azure OpenAI or AWS Bedrock). Both register at once
 and share one login, so you pick the route per model. See
 [Orchestration vs. Foundation](#orchestration-vs-foundation).
 
+When loaded in OMP, the adapter adds a response requirement to the SAP system
+prompt: completed turns must contain visible text or a tool call. A no-action
+message receives a brief model-generated acknowledgment rather than an empty
+response that OMP rejects. The provider does not fabricate text, suppress errors,
+or add retries. Upstream Pi requests do not receive this instruction.
+
 ## Prerequisites
 
 - pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**

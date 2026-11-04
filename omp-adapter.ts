@@ -127,21 +127,15 @@ function resolveServiceKey(options: SimpleStreamOptions | undefined): string | u
 	return fromOptions ?? process.env[AICORE_SERVICE_KEY_ENV];
 }
 
-/**
- * Normalize omp's `Context` to the shape the upstream (pi 0.81) SAP translator
- * expects. The one incompatibility that matters: omp typed `Context.systemPrompt`
- * as `string[]` (multiple system blocks), whereas pi 0.81 used a single `string`.
- * `translate.ts` assigns `context.systemPrompt` straight into SAP's `system`
- * message `content`, which is `string | TextContent[]` — an array of BARE strings
- * is neither, so SAP orchestration 400s. Join the blocks into one string
- * (blank-line separated), matching pi's original single-prompt contract.
- */
+/** Normalize OMP system blocks and require output its turn loop can complete. */
 function normalizeContext(context: Context): Context {
 	const sp = (context as { systemPrompt?: unknown }).systemPrompt;
-	if (Array.isArray(sp)) {
-		return { ...context, systemPrompt: sp.join("\n\n") } as unknown as Context;
-	}
-	return context;
+	const systemPrompt = Array.isArray(sp) ? sp.join("\n\n") : context.systemPrompt;
+	return {
+		...context,
+		systemPrompt: `${systemPrompt ?? ""}\n\nOMP requires every completed turn to contain visible text or a tool call. ` +
+			`When no action or reply is needed, return a brief acknowledgment instead of an empty response.`,
+	};
 }
 
 /**

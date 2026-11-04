@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OMP requests now require visible text or a tool call on completed turns. Models
+  return a brief acknowledgment when no action is needed instead of an empty stop
+  that OMP retries to failure. Upstream Pi requests and response error handling
+  are unchanged.
+
 - Preserve OMP developer messages, including extension questions, todo reminders,
   and Continue, instead of silently dropping their instructions from SAP requests.
   Orchestration keeps the developer role; foundation routes use their supported
