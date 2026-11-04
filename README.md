@@ -128,6 +128,12 @@ Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
 iteration loop while developing.
 
+`npm test` discovers offline `scripts/test-*.mjs` checks and runs up to four
+files concurrently in separate Node processes. Compatibility and installed
+startup checks remain separate (`npm run test:compat`, `npm run test:startup`).
+Pass native runner options with `npm test -- --test-concurrency=1` for serial
+execution or `npm test -- --test-reporter=tap` for TAP output.
+
 ### Alternative: install from git
 
 For an unpublished fork or a branch you want to track directly:
