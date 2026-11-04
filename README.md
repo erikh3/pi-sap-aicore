@@ -7,11 +7,11 @@ foundation endpoints such as Azure OpenAI or AWS Bedrock). Both register at once
 and share one login, so you pick the route per model. See
 [Orchestration vs. Foundation](#orchestration-vs-foundation).
 
-When loaded in OMP, the adapter adds a response requirement to the SAP system
-prompt: completed turns must contain visible text or a tool call. A no-action
-message receives a brief model-generated acknowledgment rather than an empty
-response that OMP rejects. The provider does not fabricate text, suppress errors,
-or add retries. Upstream Pi requests do not receive this instruction.
+In OMP, a normally completed SAP response with no visible text or tool calls is
+shown as `No response.`. This provider-generated status prevents empty-stop
+retry errors without changing the system prompt. Usage is preserved; errors,
+refusals, aborts, token-limit stops, and incomplete tool calls are unchanged.
+Upstream Pi responses are unchanged.
 
 ## Prerequisites
 

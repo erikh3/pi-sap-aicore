@@ -30,6 +30,7 @@ import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOpti
 
 import { parseAndValidateServiceKey } from "./src/auth.ts";
 import type { SapModelCatalogController } from "./src/model-catalog-controller.ts";
+import { completeOmpStream } from "./src/omp-stream.ts";
 import { createSapProviders, FOUNDATION_PROVIDER_ID, SAP_PROVIDER_ID } from "./src/providers.ts";
 
 const AICORE_SERVICE_KEY_ENV = "AICORE_SERVICE_KEY";
@@ -127,15 +128,10 @@ function resolveServiceKey(options: SimpleStreamOptions | undefined): string | u
 	return fromOptions ?? process.env[AICORE_SERVICE_KEY_ENV];
 }
 
-/** Normalize OMP system blocks and require output its turn loop can complete. */
+/** Normalize OMP system blocks to the upstream Pi context shape. */
 function normalizeContext(context: Context): Context {
 	const sp = (context as { systemPrompt?: unknown }).systemPrompt;
-	const systemPrompt = Array.isArray(sp) ? sp.join("\n\n") : context.systemPrompt;
-	return {
-		...context,
-		systemPrompt: `${systemPrompt ?? ""}\n\nOMP requires every completed turn to contain visible text or a tool call. ` +
-			`When no action or reply is needed, return a brief acknowledgment instead of an empty response.`,
-	};
+	return Array.isArray(sp) ? { ...context, systemPrompt: sp.join("\n\n") } : context;
 }
 
 /**
@@ -155,7 +151,7 @@ function wrapStream(
 		// the upstream provider's stream path (see stream.ts ensureServiceKey).
 		const serviceKey = resolveServiceKey(options);
 		if (serviceKey) process.env[AICORE_SERVICE_KEY_ENV] = serviceKey;
-		return provider.streamSimple(effectiveModel, normalizeContext(context), options);
+		return completeOmpStream(provider.streamSimple(effectiveModel, normalizeContext(context), options) as AssistantMessageEventStream);
 	};
 }
 
