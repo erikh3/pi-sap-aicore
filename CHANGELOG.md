@@ -34,12 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `npm test` now discovers offline test scripts and runs four isolated Node test
+  processes concurrently instead of maintaining a long sequential shell command.
+  Compatibility and installed-startup checks remain separate.
+
 - Updated `@sap-ai-sdk/ai-api`, `core`, `foundation-models`, and `orchestration`
   to 2.17.0. Added `@sap-ai-sdk/openai` 2.17.0 and its OpenAI 7 dependency.
   Removed the obsolete connectivity Cache import patch and rebased the
   orchestration length-finish diagnostic patch.
 
 ### Fixed
+
+- Empty normal SAP stops in OMP now display `No response.` instead of triggering
+  empty-stop retries. The provider preserves usage and leaves errors, refusals,
+  aborts, token-limit stops, and incomplete tool calls unchanged. System prompts
+  and upstream Pi responses are unchanged.
 
 - Preserve OMP developer messages, including extension questions, todo reminders,
   and Continue, instead of silently dropping their instructions from SAP requests.

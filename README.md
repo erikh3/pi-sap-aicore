@@ -7,6 +7,12 @@ foundation endpoints such as Azure OpenAI or AWS Bedrock). Both register at once
 and share one login, so you pick the route per model. See
 [Orchestration vs. Foundation](#orchestration-vs-foundation).
 
+In OMP, a normally completed SAP response with no visible text or tool calls is
+shown as `No response.`. This provider-generated status prevents empty-stop
+retry errors without changing the system prompt. Usage is preserved; errors,
+refusals, aborts, token-limit stops, and incomplete tool calls are unchanged.
+Upstream Pi responses are unchanged.
+
 ## Prerequisites
 
 - pi **0.81.0 or newer** installed (`npm install -g @earendil-works/pi-coding-agent`); this release is validated against **pi 1.2.0**, with compatibility checks on **0.81.0** and **0.84.3**
@@ -121,6 +127,12 @@ plus any direct **foundation** models under `sap-aicore-foundation/`:
 Run `pi -e ./index.ts` to launch pi with the local extension loaded; this
 overrides any globally-installed version for the session, which is the fastest
 iteration loop while developing.
+
+`npm test` discovers offline `scripts/test-*.mjs` checks and runs up to four
+files concurrently in separate Node processes. Compatibility and installed
+startup checks remain separate (`npm run test:compat`, `npm run test:startup`).
+Pass native runner options with `npm test -- --test-concurrency=1` for serial
+execution or `npm test -- --test-reporter=tap` for TAP output.
 
 ### Alternative: install from git
 
